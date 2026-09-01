@@ -18,6 +18,7 @@ from .framework import framework_keywords
 from .furniture import detect_furniture, furniture_keywords
 from .interiors import detect_interior_decor, detect_wall_floor, interior_keywords
 from .linking import linking_keywords
+from .natural_features import detect_features, feature_keywords
 from .outdoors import (
   detect_custom_trees,
   detect_landscape,
@@ -28,6 +29,7 @@ from .redstone_lighting import detect_lighting_system, lighting_keywords
 from .redstone_transport import detect_transport_system, transport_keywords
 from .structure import detect_shape, shape_keywords
 from .themed_rooms import detect_room, room_keywords
+from .themes import THEMES, Theme, detect_themes, theme_block_names
 from .windows import detect_window_style, window_keywords
 
 BUILD_TERMS = {
