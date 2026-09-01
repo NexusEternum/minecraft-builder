@@ -1,0 +1,48 @@
+# RunPod H100 training config — larger batch, same model architecture
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  resolution: 32
+  max_palette_size: 256
+  train_split: 0.85
+  captions_file: data/captions.json
+
+model:
+  embed_dim: 32
+  base_channels: 64
+  channel_mults: [1, 2, 4]
+  num_res_blocks: 2
+  text_dim: 256
+  text_vocab_size: 128
+  text_max_len: 128
+
+diffusion:
+  timesteps: 200
+  beta_schedule: cosine
+
+train:
+  batch_size: 64          # H100 has plenty of VRAM for this small 32³ model
+  epochs: 100
+  lr: 1.0e-4
+  weight_decay: 0.01
+  grad_clip: 1.0
+  non_air_weight: 5.0
+  save_every: 10
+  log_every: 25
+  checkpoint_dir: checkpoints
+  device: cuda
+  num_workers: 4
+
+generate:
+  guidance_scale: 3.0
+  num_samples: 1
+  output_dir: output
+  use_rag: false
+
+rag:
+  index_dir: data/rag
+  source_dir: data/guide
+  chunk_size: 500
+  chunk_overlap: 80
+  top_k: 4

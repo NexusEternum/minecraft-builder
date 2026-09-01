@@ -1,0 +1,47 @@
+# Training configuration for Minecraft Builder (from-scratch 3D diffusion)
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  resolution: 32          # voxel grid size (32³)
+  max_palette_size: 256   # max unique block classes
+  train_split: 0.85
+  captions_file: data/captions.json
+
+model:
+  embed_dim: 32           # per-voxel embedding dimension
+  base_channels: 64       # U-Net base width
+  channel_mults: [1, 2, 4]
+  num_res_blocks: 2
+  text_dim: 256           # text conditioning dimension
+  text_vocab_size: 128    # ASCII chars + special tokens
+  text_max_len: 128
+
+diffusion:
+  timesteps: 200
+  beta_schedule: cosine   # linear | cosine
+
+train:
+  batch_size: 8
+  epochs: 100
+  lr: 1.0e-4
+  weight_decay: 0.01
+  grad_clip: 1.0
+  non_air_weight: 5.0     # upweight loss on occupied voxels
+  save_every: 10
+  log_every: 50
+  checkpoint_dir: checkpoints
+  device: cuda            # cuda | cpu
+
+generate:
+  guidance_scale: 3.0     # classifier-free guidance strength
+  num_samples: 1
+  output_dir: output
+  use_rag: false          # enrich prompts from the creative guide
+
+rag:
+  index_dir: data/rag
+  source_dir: data/guide  # put your book PDF/txt here (private, not committed)
+  chunk_size: 500         # words per chunk
+  chunk_overlap: 80
+  top_k: 4                # passages to retrieve per prompt

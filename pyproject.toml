@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minecraft-builder"
+version = "0.1.0"
+description = "Train a custom model to generate Minecraft builds as Litematica files"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2.0",
+    "litemapy>=0.10.0",
+    "nbtlib>=2.0.0",
+    "numpy>=1.26.0",
+    "pyyaml>=6.0",
+    "tqdm>=4.66.0",
+    "einops>=0.7.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+    "tensorboard>=2.14.0",
+    "pypdf>=4.0.0",
+    "scikit-learn>=1.4.0",
+]
+
+[project.scripts]
+mcbuilder-train = "minecraft_builder.train:main"
+mcbuilder-generate = "minecraft_builder.generate:main"
+mcbuilder-preprocess = "minecraft_builder.scripts.preprocess:main"
+mcbuilder-ingest-guide = "minecraft_builder.scripts.ingest_guide:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

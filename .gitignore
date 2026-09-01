@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+output/
+checkpoints/
+data/processed/
+data/guide/
+data/rag/
+data/book_builds/
+*.litematic
+*.pt

@@ -1,0 +1,38 @@
+{
+  "book": "Bite-Sized Builds",
+  "expected_count": 23,
+  "processed": [
+    "bite_creeper",
+    "bite_toadstool_house",
+    "bite_alarm_system",
+    "bite_combination_lock",
+    "bite_fairy_treehouse",
+    "bite_flying_school",
+    "bite_item_destroyer",
+    "bite_firefighter_plane",
+    "bite_shooting_gallery",
+    "bite_halloween_maze",
+    "bite_train_station",
+    "bite_cart_collector",
+    "bite_bouncy_castle",
+    "bite_medieval_windmill",
+    "bite_portal_toggle",
+    "bite_outdoor_amphitheatre",
+    "bite_hidden_bunker",
+    "bite_dolphin_fountain",
+    "bite_aviary_pyramid",
+    "bite_deep_sea_submarine",
+    "bite_underwater_airlock",
+    "bite_tropical_chalet",
+    "bite_survivalists_vault"
+  ],
+  "combinations": [
+    "bite_combo_submarine_airlock",
+    "bite_combo_maze_creeper",
+    "bite_combo_fountain_aviary",
+    "bite_combo_train_collector",
+    "bite_combo_bunker_destroyer",
+    "bite_combo_vault_alarm"
+  ],
+  "pending": []
+}

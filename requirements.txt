@@ -1,0 +1,12 @@
+torch>=2.2.0
+litemapy>=0.10.0
+nbtlib>=2.0.0
+numpy>=1.26.0
+pyyaml>=6.0
+tqdm>=4.66.0
+einops>=0.7.0
+click>=8.1.0
+rich>=13.0.0
+tensorboard>=2.14.0
+pypdf>=4.0.0
+scikit-learn>=1.4.0
