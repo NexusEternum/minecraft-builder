@@ -49,7 +49,9 @@ class TextEncoder(nn.Module):
       batch_first=True,
       activation="gelu",
     )
-    self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+    self.transformer = nn.TransformerEncoder(
+      encoder_layer, num_layers=num_layers, enable_nested_tensor=False
+    )
     self.proj = nn.Sequential(
       nn.LayerNorm(embed_dim),
       nn.Linear(embed_dim, out_dim),
