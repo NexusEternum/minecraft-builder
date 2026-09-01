@@ -105,6 +105,7 @@ class GaussianDiffusion(nn.Module):
   ) -> torch.Tensor:
     device = voxel_indices.device
     b = voxel_indices.shape[0]
+    voxel_indices = voxel_indices.clamp(0, self.num_classes - 1)
     x0 = self.embed_voxels(voxel_indices)
     t = torch.randint(0, self.config.timesteps, (b,), device=device)
     xt, noise = self.q_sample(x0, t)
@@ -119,8 +120,8 @@ class GaussianDiffusion(nn.Module):
     pred_noise = self.unet(xt, t, text_emb)
     weight = torch.where(
       voxel_indices.unsqueeze(1) != 0,
-      torch.tensor(non_air_weight, device=device),
-      torch.tensor(1.0, device=device),
+      torch.full((), non_air_weight, device=device, dtype=x0.dtype),
+      torch.ones((), device=device, dtype=x0.dtype),
     )
     loss = (weight * (pred_noise - noise).pow(2)).mean()
     return loss

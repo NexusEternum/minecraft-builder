@@ -35,15 +35,8 @@ class VoxelDataset(Dataset):
 
   def _discover_samples(self) -> list[Path]:
     paths: list[Path] = []
-    for ext in ("*.npz", "*.npy"):
+    for ext in ("*.npz",):
       paths.extend(sorted(self.data_dir.glob(ext)))
-    # Book builds folder
-    book_dir = self.data_dir.parent / "book_builds"
-    if book_dir.exists():
-      for ext in ("*.litematic", "*.npz"):
-        paths.extend(sorted(book_dir.glob(ext)))
-    for ext in SUPPORTED_EXTENSIONS:
-      paths.extend(sorted(self.data_dir.glob(f"*{ext}")))
     if not paths:
       raise FileNotFoundError(f"No training files found in {self.data_dir}")
     return paths

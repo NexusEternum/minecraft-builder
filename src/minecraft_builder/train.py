@@ -50,6 +50,9 @@ def main(config: str, resume: str | None):
   cfg = load_config(Path(config))
   device_name = cfg["train"]["device"]
   device = torch.device(device_name if torch.cuda.is_available() else "cpu")
+  if device.type == "cuda":
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
   console.print(f"[cyan]Device: {device}[/cyan]")
 
   processed_dir = Path(cfg["data"]["processed_dir"])
@@ -119,6 +122,9 @@ def main(config: str, resume: str | None):
       if global_step % cfg["train"]["log_every"] == 0:
         writer.add_scalar("train/loss", loss.item(), global_step)
       pbar.set_postfix(loss=f"{loss.item():.4f}")
+      if not torch.isfinite(loss):
+        console.print("[red]Non-finite loss detected — stopping training.[/red]")
+        raise SystemExit(1)
 
     avg_train = train_loss / max(len(train_loader), 1)
 
