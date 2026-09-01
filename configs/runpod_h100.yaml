@@ -24,7 +24,7 @@ diffusion:
 train:
   batch_size: 64          # H100 has plenty of VRAM for this small 32³ model
   epochs: 100
-  lr: 3.0e-5
+  lr: 1.0e-4
   weight_decay: 0.01
   grad_clip: 1.0
   non_air_weight: 5.0

@@ -67,9 +67,14 @@ class TextEncoder(nn.Module):
       (B, out_dim) text embedding
     """
     mask = tokens == PAD_IDX
+    # Ensure at least one position is unmasked per row — all-True masks
+    # cause softmax(all -inf) = NaN in the transformer on CUDA.
+    all_pad = mask.all(dim=1)
+    if all_pad.any():
+      mask = mask.clone()
+      mask[all_pad, 0] = False
     x = self.token_embed(tokens) + self.pos_embed
     x = self.transformer(x, src_key_padding_mask=mask)
-    # Mean pool over non-pad tokens
     valid = (~mask).unsqueeze(-1).float()
     pooled = (x * valid).sum(dim=1) / valid.sum(dim=1).clamp(min=1)
     return self.proj(pooled)

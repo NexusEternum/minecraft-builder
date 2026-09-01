@@ -50,9 +50,6 @@ def main(config: str, resume: str | None):
   cfg = load_config(Path(config))
   device_name = cfg["train"]["device"]
   device = torch.device(device_name if torch.cuda.is_available() else "cpu")
-  if device.type == "cuda":
-    torch.backends.cuda.matmul.allow_tf32 = False
-    torch.backends.cudnn.allow_tf32 = False
   console.print(f"[cyan]Device: {device}[/cyan]")
 
   processed_dir = Path(cfg["data"]["processed_dir"])
