@@ -1,5 +1,5 @@
 torch>=2.2.0
-litemapy>=0.10.0
+litemapy>=0.10.0b0
 nbtlib>=2.0.0
 numpy>=1.26.0
 pyyaml>=6.0

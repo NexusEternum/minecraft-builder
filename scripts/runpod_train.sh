@@ -9,7 +9,7 @@ echo "==> Python: $(python --version)"
 python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')"
 
 echo "==> Installing package"
-pip install -e . -q
+pip install -e . --pre -q
 
 echo "==> Preprocessing (200 synthetic + 34 book builds)"
 python -m minecraft_builder.scripts.preprocess --synthetic 200
