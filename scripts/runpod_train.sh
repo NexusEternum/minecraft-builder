@@ -11,8 +11,8 @@ python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('GPU:'
 echo "==> Installing package"
 pip install -e . --pre -q
 
-echo "==> Preprocessing (200 synthetic + 34 book builds)"
-python -m minecraft_builder.scripts.preprocess --synthetic 200
+echo "==> Preprocessing (200 synthetic + all book builds @ 32³)"
+python -m minecraft_builder.scripts.preprocess --config configs/runpod_h100.yaml --synthetic 200 --book-builds
 
 echo "==> Training on H100 config"
 python -m minecraft_builder.train --config configs/runpod_h100.yaml

@@ -26,9 +26,21 @@ def generate_book_build(build_id: str, palette: BlockPalette | None = None) -> t
   elif build_id.startswith("bite_combo_"):
     from .combination_generators import generate_combination
     voxels = generate_combination(build_id)
+  elif build_id.startswith("epic_inventions_"):
+    from .epic_inventions_generators import generate_epic_inventions_build
+    voxels = generate_epic_inventions_build(build_id)
+  elif build_id.startswith("epic_builds_"):
+    from .epic_builds_generators import generate_epic_build
+    voxels = generate_epic_build(build_id)
+  elif build_id.startswith("epic_bases_"):
+    from .epic_bases_generators import generate_epic_base
+    voxels = generate_epic_base(build_id)
   elif build_id.startswith("bite_"):
     from .bite_sized_generators import generate_bite_sized
     voxels = generate_bite_sized(build_id)
+  elif build_id.startswith("fortress_"):
+    from .exploded_fortress_generators import generate_fortress_build
+    voxels = generate_fortress_build(build_id)
   else:
     raise NotImplementedError(f"No generator for {build_id}")
 

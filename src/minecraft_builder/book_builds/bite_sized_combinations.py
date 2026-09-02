@@ -275,6 +275,204 @@ COMBINATION_BUILDS: dict[str, CombinationBuild] = {
       ),
       ("layered vault security", "alarm triggers on unauthorized entry"),
     ),
+    _combo(
+      "bite_combo_greenhouse_wishing_well",
+      "Garden with Wishing Well and Greenhouse",
+      ("bite_greenhouse", "bite_wishing_well"),
+      "Combination challenge 1 — garden with wishing well beside greenhouse",
+      (
+        "a mud brick glass greenhouse with froglights and birch planter interior "
+        "merged with a stone brick wishing well redstone hopper reward garden, "
+        "warped roof lantern azalea landscaping on shared grass plot"
+      ),
+      "garden",
+      "plains",
+      (
+        "minecraft:mud_bricks",
+        "minecraft:glass_pane",
+        "minecraft:stone_bricks",
+        "minecraft:warped_planks",
+        "minecraft:hopper",
+        "minecraft:comparator",
+        "minecraft:flowering_azalea",
+        "minecraft:grass_block",
+      ),
+      (
+        BuildZone(
+          name="mud brick greenhouse",
+          size=(9, 10, 13),
+          materials=("mud_bricks", "glass_pane", "birch_planks", "pearlescent_froglight"),
+          features=("gabled glass greenhouse", "spruce trapdoor plant beds", "froglight hanging roof"),
+          interior=("birch plank floor", "barrel workbench", "flowering azalea planters"),
+        ),
+        BuildZone(
+          name="wishing well garden",
+          size=(6, 6, 6),
+          materials=("stone_bricks", "warped_planks", "hopper", "comparator", "dispenser"),
+          features=("3 by 3 stone well", "redstone hopper reward elevator", "warped tiered roof lantern"),
+          interior=("hopper comparator chest receiver", "dispenser surface reward"),
+        ),
+      ),
+      ("greenhouse and well share one garden plot", "redstone wishing well beside glasshouse"),
+    ),
+    _combo(
+      "bite_combo_watchtower_skull_cove",
+      "Pirate Watchtower Above Skull Cove",
+      ("bite_skull_cove",),
+      "Combination challenge 2 — pirate spotting hideout above skull cove",
+      (
+        "a wooden pirate watchtower with log cross-braced fence supports and lookout "
+        "cabin on a cliff edge overlooking skull cove smooth quartz skull facade "
+        "jungle dock and soul lantern treasure cave"
+      ),
+      "pirate",
+      "ocean",
+      (
+        "minecraft:oak_log",
+        "minecraft:oak_fence",
+        "minecraft:oak_planks",
+        "minecraft:smooth_quartz",
+        "minecraft:jungle_planks",
+        "minecraft:vine",
+        "minecraft:soul_lantern",
+        "minecraft:water",
+      ),
+      (
+        BuildZone(
+          name="cliff-top watchtower",
+          size=(5, 12, 5),
+          materials=("oak_log", "oak_fence", "oak_planks", "vine"),
+          features=("vertical log mast", "cross-braced fence rigging", "roofed lookout cabin"),
+          interior=("oak plank lookout floor",),
+        ),
+        BuildZone(
+          name="skull cove cliff",
+          size=(20, 15, 13),
+          materials=("stone", "smooth_quartz", "jungle_planks", "water"),
+          features=("quartz skull facade cave mouth", "12 deep cove", "jungle dock", "treasure room"),
+          interior=("soul lantern gold chest loot",),
+        ),
+      ),
+      ("watchtower overlooks skull cliff cove", "pirate spotting hideout above cave mouth"),
+    ),
+    _combo(
+      "bite_combo_bus_racetrack",
+      "Monster-Truck Bus Racetrack",
+      ("bite_monster_truck_bus", "bite_horse_racecourse"),
+      "Combination challenge 3 — monster-truck bus on horse racecourse track",
+      (
+        "a yellow monster truck school bus on oversized black wheels parked on a "
+        "U-shaped horse racecourse gray concrete track with red white checkered "
+        "curbs starting gate and grandstand fences"
+      ),
+      "racing",
+      "plains",
+      (
+        "minecraft:yellow_concrete",
+        "minecraft:black_concrete",
+        "minecraft:gray_concrete",
+        "minecraft:red_concrete",
+        "minecraft:white_concrete",
+        "minecraft:oak_fence",
+        "minecraft:tinted_glass",
+      ),
+      (
+        BuildZone(
+          name="monster truck bus",
+          size=(8, 6, 12),
+          materials=("yellow_concrete", "black_concrete", "tinted_glass", "warped_planks"),
+          features=("oversized 3 by 3 wheels", "school bus body", "tinted glass windows"),
+          interior=("warped plank seats", "warped button dashboard"),
+        ),
+        BuildZone(
+          name="horse racecourse track",
+          size=(18, 4, 16),
+          materials=("gray_concrete", "red_concrete", "white_concrete", "oak_fence"),
+          features=("U-shaped track", "checkered curb", "starting gate", "grandstand"),
+          interior=(),
+        ),
+      ),
+      ("bus displayed on racetrack infield", "monster truck meets horse track"),
+    ),
+    _combo(
+      "bite_combo_steamboat_island",
+      "Steamboat Trip to Secret Island Base",
+      ("bite_steamboat", "bite_secret_island_base"),
+      "Combination challenge 4 — steamboat voyage to secret island base",
+      (
+        "a gray concrete steamboat with birch slab decks paddle wheels and campfire "
+        "chimneys sailing toward a hidden grass island with spruce tree above an "
+        "underwater purpur pillar glass aquarium base with dual water elevators"
+      ),
+      "aquatic",
+      "ocean",
+      (
+        "minecraft:gray_concrete",
+        "minecraft:birch_slab",
+        "minecraft:water",
+        "minecraft:purpur_pillar",
+        "minecraft:light_blue_stained_glass_pane",
+        "minecraft:spruce_log",
+        "minecraft:grass_block",
+      ),
+      (
+        BuildZone(
+          name="river steamboat",
+          size=(22, 12, 9),
+          materials=("gray_concrete", "birch_slab", "smooth_quartz", "campfire"),
+          features=("22 by 9 hull", "7 by 7 roof deck", "5 by 5 paddle wheels", "twin chimneys"),
+          interior=("engine room blast furnace smoker", "birch slab passenger decks"),
+        ),
+        BuildZone(
+          name="secret island base",
+          size=(13, 16, 13),
+          materials=("purpur_pillar", "light_blue_stained_glass_pane", "water", "grass_block"),
+          features=("octagonal underwater glass base", "hidden grass island", "dual water elevators"),
+          interior=("spruce tree surface hideout", "kelp underwater approach"),
+        ),
+      ),
+      ("steamboat approaches secret island in ocean cube", "riverboat plus hidden underwater base"),
+    ),
+    _combo(
+      "bite_combo_pagoda_hot_spring",
+      "Pagoda with Hot-Spring Bath",
+      ("bite_pagoda", "bite_hot_spring"),
+      "Combination challenge 5 — pagoda beside tiered hot spring bath",
+      (
+        "a four-story mangrove pagoda with oxidized copper eaves beside a tiered "
+        "soul sand hot spring basalt pool cluster L-shaped birch chalet granite roof "
+        "pavilion bamboo azalea gravel garden"
+      ),
+      "wellness",
+      "plains",
+      (
+        "minecraft:mangrove_planks",
+        "minecraft:oxidized_cut_copper_stairs",
+        "minecraft:soul_sand",
+        "minecraft:basalt",
+        "minecraft:polished_granite",
+        "minecraft:stripped_birch_log",
+        "minecraft:bamboo",
+        "minecraft:grass_block",
+      ),
+      (
+        BuildZone(
+          name="four-story pagoda tower",
+          size=(15, 28, 15),
+          materials=("mangrove_planks", "white_wool", "oxidized_cut_copper_stairs", "stone_bricks"),
+          features=("15 by 15 tapering tiers", "copper eaves verandas", "gold anvil interior"),
+          interior=("barrel gold anvil shrine", "ladder between floors"),
+        ),
+        BuildZone(
+          name="tiered hot spring bath",
+          size=(23, 8, 22),
+          materials=("soul_sand", "basalt", "water", "polished_granite", "birch_slab"),
+          features=("five tiered pools", "L-shaped chalet pavilion", "campfire seating"),
+          interior=("open air chalet birch slab floor",),
+        ),
+      ),
+      ("pagoda overlooks rocky hot spring pools", "East Asian tower plus volcanic bath"),
+    ),
   )
 }
 

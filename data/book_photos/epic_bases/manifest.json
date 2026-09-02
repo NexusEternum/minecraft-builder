@@ -1,0 +1,28 @@
+{
+  "book": "Minecraft Epic Bases",
+  "scale": "module",
+  "future_mega_resolution": {
+    "default": 100,
+    "note": "Full longship/base spreads are 150³"
+  },
+  "mega_resolution": {
+    "epic_bases_fenrirs_tooth": 150
+  },
+  "photo_policy": "Full page spreads OK — reference only, not fed to model",
+  "processed": [
+    "epic_bases_wolf_figurehead",
+    "epic_bases_deck_brazier",
+    "epic_bases_emerald_wolf",
+    "epic_bases_crows_nest",
+    "epic_bases_ship_flag",
+    "epic_bases_ship_oars",
+    "epic_bases_artillery_cannon"
+  ],
+  "future_mega": [
+    "epic_bases_fenrirs_tooth"
+  ],
+  "reference_only": [
+    "07_concept_rainbow_shrine.jpg"
+  ],
+  "pending": []
+}

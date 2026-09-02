@@ -2,6 +2,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 .env
+.runpod_ed25519
+.runpod_ed25519.pub
 .venv/
 venv/
 dist/

@@ -1,0 +1,48 @@
+{
+  "book": "Minecraft Epic Builds",
+  "scale": "module",
+  "future_mega_resolution": {
+    "default": 100,
+    "note": "Full chapter spreads are 150³"
+  },
+  "mega_resolution": {
+    "epic_builds_hanging_village": 150,
+    "epic_builds_survival_arena": 150
+  },
+  "photo_policy": "Full page spreads OK — reference only, not fed to model",
+  "processed": [
+    "epic_builds_hanging_tower",
+    "epic_builds_landing_pad",
+    "epic_builds_bathhouse",
+    "epic_builds_mountain_corridor",
+    "epic_builds_suspended_house",
+    "epic_builds_fortress",
+    "epic_builds_water_elevator",
+    "epic_builds_spiral_staircase",
+    "epic_builds_message_train",
+    "epic_builds_bridge_supports",
+    "epic_builds_elytra_launcher",
+    "epic_builds_earth_arena",
+    "epic_builds_nether_arena",
+    "epic_builds_ocean_arena",
+    "epic_builds_escape_portal",
+    "epic_builds_grandstand",
+    "epic_builds_arming_chamber",
+    "epic_builds_dueling_towers",
+    "epic_builds_cactus_pitfall",
+    "epic_builds_nether_spawner",
+    "epic_builds_auto_armorer",
+    "epic_builds_tnt_trap",
+    "epic_builds_sinkhole",
+    "epic_builds_sand_trap"
+  ],
+  "future_mega": [
+    "epic_builds_hanging_village",
+    "epic_builds_survival_arena"
+  ],
+  "reference_photos": {
+    "epic_builds_hanging_village": "01_hanging_village_overview_future.jpg",
+    "epic_builds_survival_arena": "04_survival_arena_overview_future.jpg"
+  },
+  "pending": []
+}

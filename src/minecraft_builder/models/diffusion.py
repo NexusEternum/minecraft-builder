@@ -166,13 +166,23 @@ class GaussianDiffusion(nn.Module):
     noise = torch.randn_like(x)
     return mean + torch.sqrt(beta) * noise
 
-  def _decode_to_indices(self, x: torch.Tensor) -> torch.Tensor:
-    """Nearest-neighbor decode from embedding space back to block classes."""
-    # x: (B, C, D, H, W) -> compare against all class embeddings
+  def _decode_to_indices(self, x: torch.Tensor, air_margin: float = 0.08) -> torch.Tensor:
+    """Nearest-neighbor decode from embedding space back to block classes.
+
+    Positions default to air unless a non-air class wins by a clear margin.
+    Without this, every voxel in the 32³ grid gets some block assigned.
+    """
     weights = self.block_embed.weight  # (num_classes, C)
     x_perm = x.permute(0, 2, 3, 4, 1)  # (B, D, H, W, C)
-    # Cosine similarity
     x_norm = F.normalize(x_perm, dim=-1)
     w_norm = F.normalize(weights, dim=-1)
     logits = torch.matmul(x_norm, w_norm.T)  # (B, D, H, W, num_classes)
-    return logits.argmax(dim=-1)
+
+    air_sim = logits[..., 0]
+    best_sim, best_idx = logits.max(dim=-1)
+    # Keep air unless another class is clearly closer in embedding space.
+    return torch.where(
+      (best_idx != 0) & (best_sim - air_sim > air_margin),
+      best_idx,
+      torch.zeros_like(best_idx),
+    )

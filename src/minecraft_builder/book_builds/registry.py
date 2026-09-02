@@ -418,6 +418,14 @@ def build_caption(build: BookBuild) -> str:
 # Merge bite-sized builds as they are added from book photos
 from .bite_sized_registry import BITE_SIZED_BUILDS  # noqa: E402
 from .bite_sized_combinations import COMBINATION_BOOK_BUILDS  # noqa: E402
+from .exploded_fortress_registry import FORTRESS_BUILDS  # noqa: E402
+from .epic_inventions_registry import EPIC_INVENTIONS_BUILDS  # noqa: E402
+from .epic_builds_registry import EPIC_BUILDS  # noqa: E402
+from .epic_bases_registry import EPIC_BASES  # noqa: E402
 
 BOOK_BUILDS.update(BITE_SIZED_BUILDS)
 BOOK_BUILDS.update(COMBINATION_BOOK_BUILDS)
+BOOK_BUILDS.update(FORTRESS_BUILDS)
+BOOK_BUILDS.update(EPIC_INVENTIONS_BUILDS)
+BOOK_BUILDS.update(EPIC_BUILDS)
+BOOK_BUILDS.update(EPIC_BASES)
