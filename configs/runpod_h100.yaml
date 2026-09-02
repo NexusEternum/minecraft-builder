@@ -22,14 +22,16 @@ diffusion:
   beta_schedule: cosine
 
 train:
-  batch_size: 64          # H100 has plenty of VRAM for this small 32³ model
-  epochs: 100
+  batch_size: 64
+  max_steps: 50000        # primary stop — ~8.3k epochs at 6 steps/epoch (425 samples)
+  epochs: 100000          # upper cap when max_steps set; ignored once max_steps reached
   lr: 1.0e-4
   weight_decay: 0.01
   grad_clip: 1.0
   non_air_weight: 5.0
-  save_every: 10
-  log_every: 25
+  save_every: 500         # also save every N epochs (legacy names for generate CLI)
+  save_every_steps: 5000  # checkpoint every 5k optimizer steps
+  log_every: 100
   checkpoint_dir: checkpoints
   device: cuda
   num_workers: 4

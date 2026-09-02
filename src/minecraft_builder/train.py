@@ -92,19 +92,62 @@ def main(config: str, resume: str | None):
   writer = SummaryWriter(log_dir=str(ckpt_dir / "logs"))
 
   start_epoch = 0
+  global_step = 0
   if resume:
     ckpt = torch.load(resume, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model"])
     optimizer.load_state_dict(ckpt["optimizer"])
     start_epoch = ckpt["epoch"] + 1
-    console.print(f"[green]Resumed from epoch {start_epoch}[/green]")
+    global_step = ckpt.get("global_step", 0)
+    console.print(f"[green]Resumed from epoch {start_epoch}, step {global_step}[/green]")
 
-  global_step = 0
-  for epoch in range(start_epoch, cfg["train"]["epochs"]):
+  max_steps = cfg["train"].get("max_steps")
+  save_every_steps = cfg["train"].get("save_every_steps")
+  target_epochs = cfg["train"]["epochs"]
+
+  def _save_checkpoint(epoch_idx: int, reason: str) -> None:
+    ckpt_path = ckpt_dir / f"model_step_{global_step:06d}.pt"
+    torch.save(
+      {
+        "epoch": epoch_idx,
+        "global_step": global_step,
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "config": cfg,
+        "palette_size": palette.size,
+      },
+      ckpt_path,
+    )
+    # Keep legacy epoch-named symlink-style copy for generate CLI compatibility
+    legacy = ckpt_dir / f"model_epoch_{epoch_idx + 1:03d}.pt"
+    torch.save(
+      {
+        "epoch": epoch_idx,
+        "global_step": global_step,
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "config": cfg,
+        "palette_size": palette.size,
+      },
+      legacy,
+    )
+    console.print(f"[green]Saved {ckpt_path} ({reason})[/green]")
+
+  epoch = start_epoch
+  while epoch < target_epochs:
+    if max_steps is not None and global_step >= max_steps:
+      break
+
     model.train()
     train_loss = 0.0
-    pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{cfg['train']['epochs']}")
+    desc = f"Epoch {epoch + 1}"
+    if max_steps is not None:
+      desc += f" | step {global_step}/{max_steps}"
+    pbar = tqdm(train_loader, desc=desc)
     for batch in pbar:
+      if max_steps is not None and global_step >= max_steps:
+        break
+
       voxels = batch["voxels"].to(device)
       loss = model.training_loss(
         voxels, batch["captions"], non_air_weight=cfg["train"]["non_air_weight"]
@@ -118,10 +161,13 @@ def main(config: str, resume: str | None):
       global_step += 1
       if global_step % cfg["train"]["log_every"] == 0:
         writer.add_scalar("train/loss", loss.item(), global_step)
-      pbar.set_postfix(loss=f"{loss.item():.4f}")
+      pbar.set_postfix(loss=f"{loss.item():.4f}", step=global_step)
       if not torch.isfinite(loss):
         console.print("[red]Non-finite loss detected — stopping training.[/red]")
         raise SystemExit(1)
+
+      if save_every_steps and global_step % save_every_steps == 0:
+        _save_checkpoint(epoch, f"step {global_step}")
 
     avg_train = train_loss / max(len(train_loader), 1)
 
@@ -134,26 +180,18 @@ def main(config: str, resume: str | None):
         loss = model.training_loss(voxels, batch["captions"])
         val_loss += loss.item()
     avg_val = val_loss / max(len(val_loader), 1)
-    writer.add_scalar("val/loss", avg_val, epoch)
+    writer.add_scalar("val/loss", avg_val, global_step)
 
-    console.print(f"Epoch {epoch + 1}: train={avg_train:.4f}  val={avg_val:.4f}")
+    console.print(f"Epoch {epoch + 1} (step {global_step}): train={avg_train:.4f}  val={avg_val:.4f}")
 
-    if (epoch + 1) % cfg["train"]["save_every"] == 0 or epoch == cfg["train"]["epochs"] - 1:
-      ckpt_path = ckpt_dir / f"model_epoch_{epoch + 1:03d}.pt"
-      torch.save(
-        {
-          "epoch": epoch,
-          "model": model.state_dict(),
-          "optimizer": optimizer.state_dict(),
-          "config": cfg,
-          "palette_size": palette.size,
-        },
-        ckpt_path,
-      )
-      console.print(f"[green]Saved {ckpt_path}[/green]")
+    if (epoch + 1) % cfg["train"]["save_every"] == 0:
+      _save_checkpoint(epoch, f"epoch {epoch + 1}")
 
+    epoch += 1
+
+  _save_checkpoint(epoch - 1, "final")
   writer.close()
-  console.print("[green]Training complete.[/green]")
+  console.print(f"[green]Training complete at step {global_step}.[/green]")
 
 
 if __name__ == "__main__":
