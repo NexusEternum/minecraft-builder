@@ -38,6 +38,7 @@ def build_model(cfg: dict, palette_size: int) -> GaussianDiffusion:
     text_dim=mcfg["text_dim"],
     text_vocab_size=mcfg["text_vocab_size"],
     text_max_len=mcfg["text_max_len"],
+    pretrained_text_encoder=mcfg.get("pretrained_text_encoder"),
   )
   return GaussianDiffusion(config)
 
@@ -83,8 +84,12 @@ def main(config: str, resume: str | None):
   )
 
   model = build_model(cfg, palette.size).to(device)
+  trainable_params = [p for p in model.parameters() if p.requires_grad]
+  total = sum(p.numel() for p in model.parameters())
+  frozen = sum(p.numel() for p in model.parameters() if not p.requires_grad)
+  console.print(f"[cyan]Parameters: {total:,} total, {frozen:,} frozen, {total - frozen:,} trainable[/cyan]")
   optimizer = torch.optim.AdamW(
-    model.parameters(), lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"]
+    trainable_params, lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"]
   )
 
   ckpt_dir = Path(cfg["train"]["checkpoint_dir"])

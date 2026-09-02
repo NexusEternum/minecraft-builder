@@ -22,7 +22,7 @@ python -m venv .venv
 pip install -e .
 
 # 1. Preprocess (generates 200 synthetic builds to bootstrap training)
-python -m minecraft_builder.scripts.preprocess --synthetic 200
+python -m minecraft_builder.scripts.preprocess --synthetic 500
 
 # 2. Train (requires GPU for reasonable speed; CPU works for smoke tests)
 python -m minecraft_builder.train

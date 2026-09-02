@@ -2528,4 +2528,184 @@ FORTRESS_BUILDS: dict[str, BookBuild] = {
       "Experienced build, ~3 hours",
     ),
   ),
+  "fortress_dungeon_oubliette": BookBuild(
+    id="fortress_dungeon_oubliette",
+    name="Oubliette Pit",
+    theme="medieval",
+    biome="plains",
+    caption=(
+      "a castle oubliette isolation pit with obsidian walls, ceiling oak trapdoor "
+      "entrance, lever controlled drop hatch, iron bar observation window and torch"
+    ),
+    palette=(
+      "minecraft:obsidian",
+      "minecraft:stone_bricks",
+      "minecraft:oak_planks",
+      "minecraft:iron_bars",
+      "minecraft:oak_trapdoor",
+      "minecraft:lever",
+      "minecraft:torch",
+    ),
+    zones=(
+      BuildZone(
+        name="obsidian pit",
+        size=(4, 6, 4),
+        materials=("obsidian", "stone_bricks"),
+        features=("deep isolation cell", "obsidian inner shell", "stone brick rim"),
+        interior=(),
+      ),
+      BuildZone(
+        name="ceiling hatch",
+        size=(2, 1, 2),
+        materials=("oak_trapdoor", "lever", "oak_planks"),
+        features=("trapdoor floor entrance", "lever controlled hatch"),
+        interior=(),
+      ),
+    ),
+    exterior_features=(
+      "underground beneath castle keep",
+      "iron bar slit observation window",
+      "torch on stone brick landing above pit",
+    ),
+    tips=(
+      "Variation from fortress dungeon oubliette spread",
+      "Prisoners dropped through ceiling trapdoor",
+      "Obsidian prevents easy escape",
+    ),
+  ),
+  "fortress_barracks_forge": BookBuild(
+    id="fortress_barracks_forge",
+    name="Castle Forge",
+    theme="medieval",
+    biome="plains",
+    caption=(
+      "a medieval castle blacksmith forge with open-sided stone brick workshop, "
+      "netherrack hearth chimney, anvil repair station, furnace and crafting table"
+    ),
+    palette=(
+      "minecraft:stone_bricks",
+      "minecraft:dark_oak_stairs",
+      "minecraft:netherrack",
+      "minecraft:fire",
+      "minecraft:anvil",
+      "minecraft:furnace",
+      "minecraft:crafting_table",
+      "minecraft:chest",
+      "minecraft:torch",
+    ),
+    zones=(
+      BuildZone(
+        name="forge workshop",
+        size=(6, 4, 5),
+        materials=("stone_bricks", "dark_oak_stairs"),
+        features=("open front blacksmith bay", "stone chimney stack"),
+        interior=("anvil", "furnace", "crafting table", "chest"),
+      ),
+      BuildZone(
+        name="hearth chimney",
+        size=(2, 5, 2),
+        materials=("netherrack", "fire", "stone_bricks"),
+        features=("netherrack eternal flame", "stone brick chimney column"),
+        interior=("flaming hearth",),
+      ),
+    ),
+    exterior_features=(
+      "attached to castle barracks in bailey ward",
+      "torch-lit stone brick walls",
+      "weapon and armor crafting area",
+    ),
+    tips=("Variation from fortress barracks forge spread",),
+  ),
+  "fortress_enchanting_hidden_library": BookBuild(
+    id="fortress_enchanting_hidden_library",
+    name="Hidden Enchanting Library",
+    theme="medieval",
+    biome="plains",
+    caption=(
+      "a hidden castle enchanting library with levitating bookshelf ring on sticky "
+      "pistons, stone pressure plate trigger, redstone floor lattice, enchanting "
+      "table at center"
+    ),
+    palette=(
+      "minecraft:oak_planks",
+      "minecraft:oak_slab",
+      "minecraft:bookshelf",
+      "minecraft:sticky_piston",
+      "minecraft:redstone_dust",
+      "minecraft:stone_pressure_plate",
+      "minecraft:enchanting_table",
+      "minecraft:torch",
+    ),
+    zones=(
+      BuildZone(
+        name="enchantment floor",
+        size=(7, 1, 7),
+        materials=("oak_planks", "redstone_dust", "stone_pressure_plate"),
+        features=("7x7 oak floor", "redstone lattice under planks"),
+        interior=("enchanting table",),
+      ),
+      BuildZone(
+        name="retractable bookshelves",
+        size=(5, 3, 5),
+        materials=("bookshelf", "sticky_piston", "oak_slab"),
+        features=("U-shaped bookshelf ring", "sticky pistons raise shelves"),
+        interior=("15 bookshelves for level 30",),
+      ),
+    ),
+    exterior_features=(
+      "concealed room in castle keep",
+      "bookshelves retract when plate triggered",
+    ),
+    tips=("Variation from fortress enchanting hidden library spread",),
+  ),
+  "fortress_cathedral_bell_tower": BookBuild(
+    id="fortress_cathedral_bell_tower",
+    name="Cathedral Bell Tower",
+    theme="medieval",
+    biome="plains",
+    caption=(
+      "a medieval cathedral bell tower with stone brick shaft, crenellated battlement "
+      "crown, spruce plank platforms, ladder access, note block bells and redstone "
+      "repeater chime circuit"
+    ),
+    palette=(
+      "minecraft:stone_bricks",
+      "minecraft:spruce_planks",
+      "minecraft:ladder",
+      "minecraft:note_block",
+      "minecraft:redstone_wire",
+      "minecraft:redstone_torch",
+      "minecraft:repeater",
+      "minecraft:torch",
+    ),
+    zones=(
+      BuildZone(
+        name="bell tower shaft",
+        size=(4, 10, 4),
+        materials=("stone_bricks", "spruce_planks", "ladder"),
+        features=("square stone tower", "multi-level wooden platforms"),
+        interior=("ladder between floors",),
+      ),
+      BuildZone(
+        name="bell platform",
+        size=(4, 2, 4),
+        materials=("note_block", "redstone_wire", "repeater", "torch"),
+        features=("note block bell array", "redstone repeater timing circuit"),
+        interior=("chime bells on top platform",),
+      ),
+      BuildZone(
+        name="battlement crown",
+        size=(4, 2, 4),
+        materials=("stone_bricks",),
+        features=("crenellated parapet", "corner merlons"),
+        interior=(),
+      ),
+    ),
+    exterior_features=(
+      "attached to cathedral entrance facade",
+      "torch-lit interior walls",
+      "crenellated stone crown",
+    ),
+    tips=("Detail module from fortress cathedral bell tower spread",),
+  ),
 }

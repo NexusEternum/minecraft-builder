@@ -2460,6 +2460,199 @@ def _generate_fortress_arrow_catapult() -> np.ndarray:
   return v
 
 
+def _generate_fortress_dungeon_oubliette() -> np.ndarray:
+  """Oubliette pit — obsidian cell with ceiling trapdoor and iron bar window."""
+  OBS = _b("obsidian")
+  STONE = _b("stone_bricks")
+  PLANKS = _b("oak_planks")
+  BARS = _b("iron_bars")
+  TRAP = _b("oak_trapdoor")
+  LEVER = _b("lever")
+  TORCH = _b("torch")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  cx, cz, oy = 16, 16, 8
+  pw, pd, ph = 4, 4, 6
+
+  # Pit shell
+  for y in range(ph):
+    for x in range(cx - pw // 2, cx + pw // 2 + 1):
+      for z in range(cz - pd // 2, cz + pd // 2 + 1):
+        edge = x in (cx - pw // 2, cx + pw // 2) or z in (cz - pd // 2, cz + pd // 2)
+        if edge:
+          _set(v, x, oy - y, z, OBS if y < ph - 1 else STONE)
+        elif y == ph - 1:
+          _set(v, x, oy - y, z, PLANKS)
+
+  # Ceiling trapdoor hatch
+  _set(v, cx, oy + 1, cz, TRAP)
+  _set(v, cx + 1, oy + 1, cz, LEVER)
+
+  # Observation window
+  _set(v, cx + pw // 2, oy - 2, cz, BARS)
+  _set(v, cx + pw // 2, oy - 3, cz, BARS)
+  _set(v, cx, oy + 2, cz + pd // 2 + 1, TORCH)
+
+  return v
+
+
+def _generate_fortress_barracks_forge() -> np.ndarray:
+  """Castle blacksmith forge — open workshop with netherrack hearth."""
+  STONE = _b("stone_bricks")
+  D_STAIRS = _b("dark_oak_stairs")
+  NETH = _b("netherrack")
+  FIRE = _b("fire")
+  ANVIL = _b("anvil")
+  FURNACE = _b("furnace")
+  CRAFT = _b("crafting_table")
+  CHEST = _b("chest")
+  TORCH = _b("torch")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  ox, oz, oy = 10, 11, 1
+  w, d, h = 6, 5, 4
+
+  # Three-wall workshop (open front)
+  for y in range(h):
+    for x in range(ox, ox + w):
+      for z in range(oz, oz + d):
+        back = z == oz + d - 1
+        side = x in (ox, ox + w - 1)
+        if back or side:
+          _set(v, x, oy + y, z, STONE)
+        elif y == 0:
+          _set(v, x, oy, z, STONE)
+
+  # Chimney and hearth
+  hx, hz = ox + w // 2, oz + 1
+  for y in range(h + 2):
+    _set(v, hx, oy + y, hz, STONE)
+  _set(v, hx, oy + 1, hz + 1, NETH)
+  _set(v, hx, oy + 2, hz + 1, FIRE)
+
+  # Work stations
+  _set(v, ox + 2, oy + 1, oz + 2, ANVIL)
+  _set(v, ox + 3, oy + 1, oz + 2, FURNACE)
+  _set(v, ox + 4, oy + 1, oz + 2, CRAFT)
+  _set(v, ox + 1, oy + 1, oz + 2, CHEST)
+  _set(v, ox + 1, oy + 3, oz + 3, D_STAIRS)
+  _set(v, ox + 4, oy + 2, oz + 3, TORCH)
+
+  return v
+
+
+def _generate_fortress_enchanting_hidden_library() -> np.ndarray:
+  """Hidden library — bookshelf ring around enchanting table with redstone floor."""
+  PLANKS = _b("oak_planks")
+  SHELF = _b("bookshelf")
+  PISTON = _b("sticky_piston")
+  DUST = _b("redstone_dust")
+  PLATE = _b("stone_pressure_plate")
+  TABLE = _b("enchanting_table")
+  TORCH = _b("torch")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  cx, cz, oy = 16, 16, 1
+  floor = 7
+
+  fx = cx - floor // 2
+  fz = cz - floor // 2
+  for x in range(fx, fx + floor):
+    for z in range(fz, fz + floor):
+      _set(v, x, oy, z, PLANKS)
+      if (x + z) % 2 == 0:
+        _set(v, x, oy - 1, z, DUST)
+
+  _set(v, cx, oy + 1, cz, TABLE)
+  _set(v, cx, oy, cz + 2, PLATE)
+
+  # U-shaped bookshelf ring
+  for x in range(fx + 1, fx + floor - 1):
+    _set(v, x, oy + 1, fz + 1, SHELF)
+    _set(v, x, oy + 2, fz + 1, SHELF)
+    _set(v, x, oy + 1, fz + floor - 2, SHELF)
+    _set(v, x, oy + 2, fz + floor - 2, SHELF)
+  for z in range(fz + 1, fz + floor - 1):
+    _set(v, fx + 1, oy + 1, z, SHELF)
+    _set(v, fx + 1, oy + 2, z, SHELF)
+    _set(v, fx + floor - 2, oy + 1, z, SHELF)
+    _set(v, fx + floor - 2, oy + 2, z, SHELF)
+
+  # Pistons under outer shelf row
+  for x in range(fx, fx + floor):
+    _set(v, x, oy - 1, fz, PISTON)
+    _set(v, x, oy - 1, fz + floor - 1, PISTON)
+
+  _set(v, fx, oy + 3, fz, TORCH)
+  _set(v, fx + floor - 1, oy + 3, fz + floor - 1, TORCH)
+
+  return v
+
+
+def _generate_fortress_cathedral_bell_tower() -> np.ndarray:
+  """Cathedral bell tower — stone shaft with note blocks and crenellations."""
+  STONE = _b("stone_bricks")
+  PLANKS = _b("spruce_planks")
+  LADDER = _b("ladder")
+  NOTE = _b("note_block")
+  DUST = _b("redstone_wire")
+  REPEATER = _b("repeater")
+  TORCH = _b("torch")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  cx, cz, oy = 16, 16, 1
+  tw = 4
+  th = 12
+
+  tx = cx - tw // 2
+  tz = cz - tw // 2
+  for y in range(th):
+    for x in range(tx, tx + tw):
+      for z in range(tz, tz + tw):
+        edge = x in (tx, tx + tw - 1) or z in (tz, tz + tw - 1)
+        if edge:
+          _set(v, x, oy + y, z, STONE)
+        else:
+          _set(v, x, oy + y, z, AIR_B)
+
+  # Interior platforms and ladder
+  for floor_y in (oy + 3, oy + 7, oy + 10):
+    for x in range(tx + 1, tx + tw - 1):
+      for z in range(tz + 1, tz + tw - 1):
+        _set(v, x, floor_y, z, PLANKS)
+  for y in range(oy + 1, oy + th):
+    _set(v, tx + 1, y, tz + 1, LADDER)
+
+  # Bell platform
+  bell_y = oy + th
+  for x in range(tx, tx + tw):
+    for z in range(tz, tz + tw):
+      _set(v, x, bell_y, z, PLANKS)
+  _set(v, cx, bell_y + 1, cz, NOTE)
+  _set(v, cx - 1, bell_y + 1, cz, NOTE)
+  _set(v, cx + 1, bell_y + 1, cz, NOTE)
+  _set(v, cx, bell_y, cz + 1, DUST)
+  _set(v, cx, bell_y, cz - 1, REPEATER)
+  _set(v, tx, bell_y + 2, tz, TORCH)
+
+  # Crenellations
+  crown_y = bell_y + 2
+  for x in range(tx, tx + tw):
+    for z in range(tz, tz + tw):
+      if (x + z) % 2 == 0 and (x in (tx, tx + tw - 1) or z in (tz, tz + tw - 1)):
+        _set(v, x, crown_y, z, STONE)
+
+  return v
+
+
 _GENERATORS: dict[str, object] = {
   "fortress_turret": _generate_fortress_turret,
   "fortress_outer_wall": _generate_fortress_outer_wall,
@@ -2478,4 +2671,8 @@ _GENERATORS: dict[str, object] = {
   "fortress_hidden_pitfall": _generate_fortress_hidden_pitfall,
   "fortress_arrow_gauntlet": _generate_fortress_arrow_gauntlet,
   "fortress_arrow_catapult": _generate_fortress_arrow_catapult,
+  "fortress_dungeon_oubliette": _generate_fortress_dungeon_oubliette,
+  "fortress_barracks_forge": _generate_fortress_barracks_forge,
+  "fortress_enchanting_hidden_library": _generate_fortress_enchanting_hidden_library,
+  "fortress_cathedral_bell_tower": _generate_fortress_cathedral_bell_tower,
 }

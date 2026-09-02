@@ -13,9 +13,10 @@ model:
   base_channels: 64       # U-Net base width
   channel_mults: [1, 2, 4]
   num_res_blocks: 2
-  text_dim: 256           # text conditioning dimension
-  text_vocab_size: 128    # ASCII chars + special tokens
+  text_dim: 384           # matches sentence-transformer output dim
+  text_vocab_size: 128    # ASCII chars + special tokens (fallback encoder)
   text_max_len: 128
+  pretrained_text_encoder: all-MiniLM-L6-v2
 
 diffusion:
   timesteps: 200

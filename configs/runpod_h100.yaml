@@ -1,4 +1,4 @@
-# RunPod H100 training config — larger batch, same model architecture
+# RunPod H100 training config — pretrained text encoder (frozen), train U-Net only
 
 data:
   raw_dir: data/raw
@@ -13,9 +13,10 @@ model:
   base_channels: 64
   channel_mults: [1, 2, 4]
   num_res_blocks: 2
-  text_dim: 256
+  text_dim: 384
   text_vocab_size: 128
   text_max_len: 128
+  pretrained_text_encoder: all-MiniLM-L6-v2
 
 diffusion:
   timesteps: 200
@@ -23,7 +24,7 @@ diffusion:
 
 train:
   batch_size: 64
-  max_steps: 50000        # primary stop — ~8.3k epochs at 6 steps/epoch (425 samples)
+  max_steps: 50000        # primary stop — ~8.3k epochs at 6 steps/epoch (722 samples)
   epochs: 100000          # upper cap when max_steps set; ignored once max_steps reached
   lr: 1.0e-4
   weight_decay: 0.01

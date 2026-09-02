@@ -148,6 +148,41 @@ def _generate_combo_pagoda_hot_spring() -> np.ndarray:
   return stamp_voxels(spring, pagoda, -5, -2, -3)
 
 
+def _generate_combo_beanstalk_shoe() -> np.ndarray:
+  """Challenge 1 (page 92): beanstalk growing from a giant shoe house."""
+  shoe = generate_bite_sized("bite_house_in_a_shoe")
+  beanstalk = generate_bite_sized("bite_giant_beanstalk")
+  return stamp_voxels(shoe, beanstalk, 2, 0, 4)
+
+
+def _generate_combo_frog_lagoon() -> np.ndarray:
+  """Challenge 2 (page 92): royal frog fountain in mermaid lagoon."""
+  lagoon = generate_bite_sized("bite_mermaid_lagoon")
+  frog = generate_bite_sized("bite_royal_frog")
+  return stamp_voxels(lagoon, frog, 6, 0, 2)
+
+
+def _generate_combo_atlantis_mushroom() -> np.ndarray:
+  """Challenge 3 (page 93): glowing mushroom cap atop atlantis tower."""
+  tower = generate_bite_sized("bite_atlantis_abode")
+  mushroom = generate_bite_sized("bite_glowing_mushroom")
+  return stamp_voxels(tower, mushroom, -1, 8, -1)
+
+
+def _generate_combo_emerald_library() -> np.ndarray:
+  """Challenge 4 (page 93): emerald apartments beside spellbook shop."""
+  tower = generate_bite_sized("bite_emerald_apartments")
+  shop = generate_bite_sized("bite_spellbook_shop")
+  return stamp_voxels(tower, shop, -8, 0, 4)
+
+
+def _generate_combo_palace_carriage() -> np.ndarray:
+  """Challenge 5 (page 93): pumpkin carriage at fairy tale palace gate."""
+  palace = generate_bite_sized("bite_fairy_tale_palace")
+  carriage = generate_bite_sized("bite_pumpkin_carriage")
+  return stamp_voxels(palace, carriage, 2, 0, -10)
+
+
 _COMBINATION_GENERATORS: dict[str, object] = {
   "bite_combo_submarine_airlock": _generate_combo_submarine_airlock,
   "bite_combo_maze_creeper": _generate_combo_maze_creeper,
@@ -160,4 +195,9 @@ _COMBINATION_GENERATORS: dict[str, object] = {
   "bite_combo_bus_racetrack": _generate_combo_bus_racetrack,
   "bite_combo_steamboat_island": _generate_combo_steamboat_island,
   "bite_combo_pagoda_hot_spring": _generate_combo_pagoda_hot_spring,
+  "bite_combo_beanstalk_shoe": _generate_combo_beanstalk_shoe,
+  "bite_combo_frog_lagoon": _generate_combo_frog_lagoon,
+  "bite_combo_atlantis_mushroom": _generate_combo_atlantis_mushroom,
+  "bite_combo_emerald_library": _generate_combo_emerald_library,
+  "bite_combo_palace_carriage": _generate_combo_palace_carriage,
 }

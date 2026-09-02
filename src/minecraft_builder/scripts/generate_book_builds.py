@@ -57,7 +57,7 @@ def main(build: str | None, output_dir: str, furnish: bool):
   palette.save(out / "palette.json")
   console.print(f"\n[cyan]Next steps:[/cyan]")
   console.print(f"  1. Copy captions: python -m minecraft_builder.scripts.export_book_captions")
-  console.print(f"  2. Preprocess:    python -m minecraft_builder.scripts.preprocess --synthetic 200")
+  console.print(f"  2. Preprocess:    python -m minecraft_builder.scripts.preprocess --synthetic 500")
   console.print(f"  3. Train:         python -m minecraft_builder.train")
 
 

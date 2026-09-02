@@ -1,0 +1,25 @@
+{
+  "book": "Minecraft: Guide to Farming",
+  "scale": "module",
+  "photo_policy": "Reference only — procedural generators produce training .npz",
+  "processed": [],
+  "future_mega": [
+    "farm_ice_palace",
+    "farm_village_windmill"
+  ],
+  "reference_photos": {
+    "01_principles_crop_farming": "01_principles_crop_farming.jpg",
+    "02_blocks_cobblestone_generator": "02_blocks_cobblestone_generator.jpg",
+    "03_ice_farm_palace_spread": "03_ice_farm_palace_spread.jpg",
+    "04_farming_village_overview_future": "04_farming_village_overview_future.jpg"
+  },
+  "pending_modules": [
+    "farm_irrigated_crop_field",
+    "farm_stone_farmhouse",
+    "farm_cobblestone_generator",
+    "farm_obsidian_sandstone_tower",
+    "farm_ice_bridge",
+    "farm_cave_workshop"
+  ],
+  "pending": []
+}

@@ -7925,6 +7925,2171 @@ def _generate_bite_pagoda() -> np.ndarray:
   return v
 
 
+def _generate_bite_magic_mirror() -> np.ndarray:
+  """
+  Magic Mirror — book dimensions:
+    9×6 stone floor, 9×10 stone brick wall, 4×5 obsidian portal,
+    5×7 smooth quartz face plate, bamboo ornate front frame.
+  """
+  STBR = _b("stone_bricks")
+  STONE = _b("stone")
+  OBS = _b("obsidian")
+  PORTAL = _b("nether_portal")
+  QUARTZ = _b("smooth_quartz")
+  QSLAB = _b("smooth_quartz_slab")
+  QSTAIR = _b("smooth_quartz_stairs")
+  BSLAB = _b("bamboo_slab")
+  BSTAIR = _b("bamboo_stairs")
+  BPLANK = _b("bamboo_planks")
+  PURPLE = _b("purple_concrete")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  ox, oz, oy = 11, 14, 3
+  fw, fd, wh = 9, 6, 10
+  px, py = ox + 2, oy + 2
+  pw, ph = 4, 5
+
+  # 9×6 stone floor
+  for x in range(ox, ox + fw):
+    for z in range(oz, oz + fd):
+      mat = STONE
+      if z >= oz + fd - 2 and ox + 3 <= x <= ox + 5:
+        mat = PURPLE if (x + z) % 2 == 0 else BPLANK
+      _set(v, x, oy - 1, z, mat)
+
+  # Stone brick wall (9×10) at back edge of floor
+  wall_z = oz
+  for y in range(oy, oy + wh):
+    for x in range(ox, ox + fw):
+      in_portal = (
+        px <= x < px + pw
+        and py + 1 <= y < py + ph - 1
+      )
+      if not in_portal:
+        _set(v, x, y, wall_z, STBR)
+
+  # Obsidian portal frame
+  for x in range(px - 1, px + pw + 1):
+    _set(v, x, py, wall_z, OBS)
+    _set(v, x, py + ph - 1, wall_z, OBS)
+  for y in range(py + 1, py + ph - 1):
+    _set(v, px - 1, y, wall_z, OBS)
+    _set(v, px + pw, y, wall_z, OBS)
+
+  # Portal interior
+  for y in range(py + 1, py + ph - 1):
+    for x in range(px, px + pw):
+      _set(v, x, y, wall_z, PORTAL)
+
+  # Quartz face plate behind portal (5×7, centered on portal)
+  fx, fy = px, py - 1
+  face_w, face_h = 5, 7
+  face_z = wall_z + 1
+  eye_y = fy + 4
+  mouth_y = fy + 1
+  for y in range(fy, fy + face_h):
+    for x in range(fx, fx + face_w):
+      is_eye = y == eye_y and x in (fx, fx + face_w - 1)
+      is_mouth = mouth_y <= y <= mouth_y + 1 and fx + 1 <= x <= fx + 3
+      if is_eye or is_mouth:
+        _set(v, x, y, face_z + 1, OBS)
+        continue
+      mat = QUARTZ
+      if is_mouth and y == mouth_y:
+        mat = QSTAIR
+      elif y in (fy, fy + face_h - 1) or x in (fx, fx + face_w - 1):
+        mat = QSLAB if (x + y) % 2 == 0 else QUARTZ
+      _set(v, x, y, face_z, mat)
+
+  # Bamboo ornate mirror frame protruding in front of wall
+  frame_z = wall_z - 1
+  for y in range(py - 1, py + ph):
+    for x in range(px - 2, px + pw + 2):
+      on_border = (
+        x in (px - 2, px + pw + 1)
+        or y in (py - 1, py + ph - 1)
+      )
+      if not on_border:
+        continue
+      corner = x in (px - 2, px + pw + 1) and y in (py - 1, py + ph - 1)
+      mat = BSTAIR if corner or (x + y) % 2 == 0 else BSLAB
+      _set(v, x, y, frame_z, mat)
+  # Decorative frame nubs
+  for x, y in (
+    (px - 2, py + 1),
+    (px + pw + 1, py + 1),
+    (px + 1, py - 1),
+    (px + 2, py + ph - 1),
+  ):
+    _set(v, x, y, frame_z, BPLANK)
+
+  return v
+
+
+def _prism_box(
+  v: np.ndarray, x0: int, y0: int, z0: int, w: int, h: int, d: int, mat: str
+) -> None:
+  for y in range(y0, y0 + h):
+    for x in range(x0, x0 + w):
+      for z in range(z0, z0 + d):
+        _set(v, x, y, z, mat)
+
+
+def _generate_bite_mermaid_lagoon() -> np.ndarray:
+  """
+  Mermaid Lagoon — book dimensions:
+    Twin 3×3 prismarine pillars 11 blocks apart, stepped inward layers,
+    3×7 arch cap, moss and azalea trees, boulders and aquatic plants.
+  """
+  PRISM = _b("prismarine")
+  WATER = _b("water")
+  SAND = _b("sand")
+  MOSS = _b("moss_block")
+  MOSSC = _b("moss_carpet")
+  FAZLEAVES = _b("flowering_azalea_leaves")
+  AZLEAVES = _b("azalea_leaves")
+  CAVEVINE = _b("cave_vines")
+  DRIP = _b("big_dripleaf")
+  SDRIP = _b("small_dripleaf")
+  CORAL = _b("brain_coral_fan")
+  SPORE = _b("spore_blossom")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  ox, oz, oy = 7, 11, 3
+  gap = 11
+  pw, pd = 3, 3
+  left_x = ox
+  right_x = ox + pw + gap
+
+  # Lagoon pool and sandy edge
+  for x in range(ox - 1, right_x + pw + 1):
+    for z in range(oz - 1, oz + pd + 5):
+      _set(v, x, oy - 1, z, WATER)
+  for x in range(ox - 3, ox):
+    for z in range(oz, oz + pd + 3):
+      _set(v, x, oy - 1, z, SAND)
+
+  # Left pillar — book steps 1–3 (layers step +x toward center)
+  left_specs = (
+    (left_x + 0, 3, 3),
+    (left_x + 1, 2, 3),
+    (left_x + 1, 3, 3),
+    (left_x + 2, 2, 3),
+    (left_x + 2, 3, 4),
+    (left_x + 3, 3, 3),
+  )
+  y = oy
+  for x0, w, d in left_specs:
+    _prism_box(v, x0, y, oz, w, 1, d, PRISM)
+    y += 1
+
+  # Right pillar — mirror stepping -x toward center
+  right_specs = (
+    (right_x + 0, 3, 3),
+    (right_x + 0, 2, 3),
+    (right_x - 1, 3, 3),
+    (right_x - 1, 2, 3),
+    (right_x - 2, 3, 4),
+    (right_x - 3, 3, 3),
+  )
+  y = oy
+  for x0, w, d in right_specs:
+    _prism_box(v, x0, y, oz, w, 1, d, PRISM)
+    y += 1
+
+  cap_y = oy + len(left_specs)
+  cap_x = left_x + 3
+  cap_w, cap_d = 7, 3
+
+  # Join arch span (step 4)
+  for x in range(cap_x, cap_x + cap_w):
+    for z in range(oz, oz + cap_d):
+      for yy in range(2):
+        _set(v, x, cap_y + yy, z, PRISM)
+
+  # 3×7 cap layer on top
+  for x in range(cap_x, cap_x + cap_w):
+    for z in range(oz, oz + cap_d):
+      _set(v, x, cap_y + 2, z, PRISM)
+
+  # Moss on arch top (step 7)
+  for x in range(cap_x, cap_x + cap_w):
+    for z in range(oz, oz + cap_d):
+      _set(v, x, cap_y + 3, z, MOSS)
+
+  # Flowering azalea trees (step 8)
+  for tx in (cap_x + 1, cap_x + cap_w - 2):
+    _set(v, tx, cap_y + 3, oz + 1, AZLEAVES)
+    for dy in range(1, 4):
+      for dx in (-1, 0, 1):
+        for dz in (-1, 0, 1):
+          if abs(dx) + abs(dz) + dy <= 3:
+            _set(v, tx + dx, cap_y + 3 + dy, oz + 1 + dz, FAZLEAVES)
+
+  # Prismarine boulders (steps 5–6)
+  boulders = (
+    (left_x + 1, oy, oz + 4, 2, 2),
+    (left_x + 4, oy, oz + 1, 2, 1),
+    (right_x + 1, oy, oz + 4, 2, 2),
+    (cap_x + 2, oy, oz + 4, 1, 1),
+    (cap_x + 4, oy - 1, oz + 5, 2, 2),
+  )
+  for bx, by, bz, bw, bd in boulders:
+    for xi in range(bw):
+      for zi in range(bd):
+        h = 1 + (xi + zi) % 2
+        for yy in range(h):
+          _set(v, bx + xi, by + yy, bz + zi, PRISM)
+        _set(v, bx + xi, by + h, bz + zi, MOSSC)
+
+  # Cave vines and spore blossoms under arch (step 9)
+  for x in range(cap_x + 1, cap_x + cap_w - 1, 2):
+    _set(v, x, cap_y + 1, oz + 1, SPORE)
+    for vy in range(2):
+      _set(v, x, cap_y - vy, oz + 1, CAVEVINE)
+
+  # Dripleaves and coral in water
+  for x, z in ((cap_x + 1, oz + 4), (cap_x + 4, oz + 5), (right_x, oz + 4)):
+    _set(v, x, oy, z, DRIP)
+    _set(v, x, oy, z + 1, SDRIP)
+  for x in (left_x, right_x + 2, cap_x + 5):
+    _set(v, x, oy, oz + pd + 2, CORAL)
+
+  return v
+
+
+def _generate_bite_giant_beanstalk() -> np.ndarray:
+  """
+  Giant Beanstalk — book dimensions (32³ summary):
+    Spiraling 2×2 warped wart stalk, white wool cloud, four 3×3 tuff sky towers.
+  """
+  WART = _b("warped_wart_block")
+  WOOL = _b("white_wool")
+  WGLASS = _b("white_stained_glass")
+  LADDER = _b("ladder")
+  CTUFF = _b("chiseled_tuff")
+  TBRICK = _b("tuff_bricks")
+  CTBRICK = _b("chiseled_tuff_bricks")
+  TUFF = _b("tuff")
+  COPPER = _b("waxed_copper_block")
+  TBSTAIR = _b("tuff_brick_stairs")
+  TBSLAB = _b("tuff_brick_slab")
+  TBWALL = _b("tuff_brick_wall")
+  CYAN = _b("cyan_wool")
+  ORANGE = _b("orange_wool")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  cx, cz, oy = 15, 16, 2
+  bx, bz = cx - 1, cz - 1
+  dirs = ((1, 0), (0, 1), (-1, 0), (0, -1))
+  y = oy
+
+  # Steps 1–5: spiraling 2×2 stalk with L-shaped leaf nubs
+  for seg, (dx, dz) in enumerate(dirs * 2):
+    for yy in range(2):
+      for ix in range(2):
+        for iz in range(2):
+          _set(v, bx + ix, y + yy, bz + iz, WART)
+    _set(v, bx + 2, y, bz, WART)
+    _set(v, bx + 2, y, bz + 1, WART)
+    _set(v, bx + 2, y + 1, bz, WART)
+    y += 2
+    bx += dx
+    bz += dz
+
+  cloud_y = y
+  # Steps 6–7: fluffy cloud with 2×2 ladder shaft
+  for cy in range(cloud_y, cloud_y + 3):
+    for x in range(cx - 4, cx + 5):
+      for z in range(cz - 4, cz + 5):
+        if max(abs(x - cx), abs(z - cz)) > 4:
+          continue
+        hole = cy == cloud_y and abs(x - cx) <= 1 and abs(z - cz) <= 1
+        if hole:
+          continue
+        edge = max(abs(x - cx), abs(z - cz)) == 4
+        mat = WGLASS if edge and cy == cloud_y + 1 else WOOL
+        _set(v, x, cy, z, mat)
+
+  for ly in range(oy + 1, cloud_y):
+    _set(v, cx, ly, cz, LADDER)
+
+  tower_y = cloud_y + 3
+  corners = ((cx - 3, cz - 3), (cx + 1, cz - 3), (cx - 3, cz + 1), (cx + 1, cz + 1))
+
+  # Steps 8–11: four hollow 3×3 tuff towers with copper cores
+  for idx, (tx, tz) in enumerate(corners):
+    for yy in range(5):
+      for dx in range(3):
+        for dz in range(3):
+          edge = dx in (0, 2) or dz in (0, 2)
+          if edge:
+            corner = dx in (0, 2) and dz in (0, 2)
+            mat = CTUFF if yy == 0 and corner else TBRICK if edge else COPPER
+            _set(v, tx + dx, tower_y + yy, tz + dz, mat)
+          elif dx == 1 and dz == 1:
+            _set(v, tx + dx, tower_y + yy, tz + dz, COPPER)
+    for dx in (0, 2):
+      for dz in (0, 2):
+        _set(v, tx + dx, tower_y + 5, tz + dz, TBSTAIR)
+        _set(v, tx + 1, tower_y + 5, tz + 1, TBSLAB)
+    # Step 15 flags
+    flag_color = CYAN if idx % 2 == 0 else ORANGE
+    _set(v, tx + 1, tower_y + 6, tz + 1, COPPER)
+    _set(v, tx + 1, tower_y + 7, tz + 1, TBWALL)
+    _set(v, tx + 1, tower_y + 8, tz + 1, flag_color)
+
+  # Steps 12–14: wall pillars and arched sides between towers
+  for px, pz in ((cx - 1, cz - 1), (cx - 1, cz + 1)):
+    _set(v, px, tower_y + 1, pz, CTBRICK)
+    _set(v, px, tower_y + 2, pz, TUFF)
+    _set(v, px, tower_y + 3, pz, TUFF)
+    _set(v, px, tower_y + 4, pz, TBSLAB)
+
+  for side_z in (cz - 2, cz + 2):
+    for x in range(cx - 2, cx + 3):
+      if abs(x - cx) == 1:
+        _set(v, x, tower_y + 2, side_z, TBSTAIR)
+      else:
+        _set(v, x, tower_y + 1, side_z, TBRICK)
+        _set(v, x, tower_y + 2, side_z, TBRICK if x % 2 == 0 else TUFF)
+
+  return v
+
+
+def _generate_bite_magicians_hat() -> np.ndarray:
+  """
+  Magician's Hat — book dimensions:
+    7-tall octagonal black wool body, mangrove band, octagonal brim,
+    two 3-wide 8-tall bunny ears, rabbit spawner.
+  """
+  BLACK = _b("black_wool")
+  WHITE = _b("white_wool")
+  PINK = _b("pink_wool")
+  MANG = _b("mangrove_planks")
+  DOOR = _b("mangrove_door")
+  SPAWNER = _b("spawner")
+  GRASS = _b("grass_block")
+  GRAVEL = _b("gravel")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  cx, cz, oy = 16, 16, 2
+
+  # Grass pad and gravel path
+  for x in range(cx - 4, cx + 5):
+    for z in range(cz - 3, cz + 6):
+      _set(v, x, oy - 1, z, GRASS)
+  for z in range(cz + 3, cz + 6):
+    _set(v, cx, oy - 1, z, GRAVEL)
+    _set(v, cx - 1, oy - 1, z, GRAVEL)
+
+  # Body — six black wool layers + mangrove band (book 7 layers)
+  for y in range(oy, oy + 6):
+    for dx in range(-3, 4):
+      for dz in range(-3, 4):
+        if not _oct_shell(dx, dz, 3):
+          continue
+        if dz == 3 and abs(dx) <= 0 and y == oy + 1:
+          _set(v, cx + dx, y, cz + dz, DOOR if y == oy + 1 else AIR_B)
+        elif dz == 3 and dx == 0 and y in (oy + 2, oy + 3):
+          _set(v, cx + dx, y, cz + dz, AIR_B)
+        else:
+          _set(v, cx + dx, y, cz + dz, BLACK)
+
+  band_y = oy + 5
+  for dx in range(-3, 4):
+    for dz in range(-3, 4):
+      if _oct_shell(dx, dz, 3):
+        _set(v, cx + dx, band_y, cz + dz, MANG)
+
+  # White wool cap inside top
+  cap_y = oy + 4
+  for dx in range(-2, 3):
+    for dz in range(-2, 3):
+      if _oct_floor(dx, dz, 2):
+        _set(v, cx + dx, cap_y, cz + dz, WHITE)
+  _set(v, cx, cap_y - 1, cz, SPAWNER)
+
+  # Brim ring one block above band
+  brim_y = band_y + 1
+  for dx in range(-4, 5):
+    for dz in range(-4, 5):
+      if _oct_floor(dx, dz, 4) and not _oct_floor(dx, dz, 3):
+        _set(v, cx + dx, brim_y, cz + dz, BLACK)
+
+  ear_y = brim_y + 1
+  # Straight ear (right) — 3 wide, 8 tall
+  for y in range(8):
+    for x in range(cx + 1, cx + 4):
+      for z in range(cz - 1, cz + 2):
+        mat = PINK if x == cx + 2 else WHITE
+        _set(v, x, ear_y + y, z, mat)
+
+  # Bent ear (left) — 5 up + 3 horizontal bend
+  for y in range(5):
+    for x in range(cx - 3, cx):
+      for z in range(cz - 1, cz + 2):
+        mat = PINK if x == cx - 2 else WHITE
+        _set(v, x, ear_y + y, z, mat)
+  bend_y = ear_y + 5
+  for x in range(cx - 3, cx):
+    for z in range(cz - 1, cz + 2):
+      _set(v, x, bend_y, z, WHITE if x != cx - 2 else PINK)
+  for i in range(3):
+    for z in range(cz - 1, cz + 2):
+      _set(v, cx - 3 - i, bend_y, z, WHITE)
+
+  return v
+
+
+def _generate_bite_ferocious_dragon() -> np.ndarray:
+  """
+  Ferocious Dragon — book dimensions (32³ summary):
+    7-wide raw gold base, mangrove body/legs/tail/wings, quartz horns and membranes.
+  """
+  GOLD = _b("raw_gold_block")
+  MANG = _b("mangrove_planks")
+  MSLAB = _b("mangrove_slab")
+  MSTAIR = _b("mangrove_stairs")
+  MSIGN = _b("mangrove_sign")
+  QUARTZ = _b("quartz_block")
+  QSTAIR = _b("quartz_stairs")
+  QSLAB = _b("quartz_slab")
+  EYE = _b("polished_blackstone_button")
+  DISP = _b("dispenser")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  cx, cz, oy = 16, 16, 3
+
+  def _gold_disk(y: int, rad: int) -> None:
+    for dx in range(-rad, rad + 1):
+      for dz in range(-rad, rad + 1):
+        if dx * dx + dz * dz <= rad * rad + 1:
+          _set(v, cx + dx, y, cz + dz, GOLD)
+
+  _gold_disk(oy - 1, 3)
+  _gold_disk(oy, 2)
+  by = oy + 1
+
+  # Steps 2–3: zigzag front legs with quartz talons
+  for lx in (cx - 2, cx + 2):
+    leg = (
+      (lx, by, cz + 2),
+      (lx, by + 1, cz + 2),
+      (lx, by + 1, cz + 3),
+      (lx, by + 2, cz + 3),
+      (lx, by + 2, cz + 2),
+      (lx, by + 3, cz + 2),
+    )
+    for x, y, z in leg:
+      _set(v, x, y, z, MANG)
+    _set(v, lx, by, cz + 1, QSTAIR)
+
+  # Steps 4–7: torso between legs and rear extension
+  for y in range(by + 2, by + 5):
+    for x in range(cx - 1, cx + 2):
+      _set(v, x, y, cz + 1, MANG)
+  for x in range(cx - 2, cx + 3):
+    _set(v, x, by + 4, cz + 1, MSLAB)
+  for z in range(cz + 2, cz + 6):
+    _set(v, cx, by + 4, z, MANG)
+    _set(v, cx, by + 5, z, MANG)
+
+  # Steps 5–6: neck and head
+  for y, z in ((by + 5, cz + 1), (by + 6, cz), (by + 7, cz - 1), (by + 8, cz - 2)):
+    _set(v, cx, y, z, MANG)
+  hy = by + 9
+  for dx in (-1, 0, 1):
+    for dz in (-3, -2, -1):
+      _set(v, cx + dx, hy, cz + dz, MANG if dz != -3 else MSTAIR)
+  _set(v, cx, hy - 1, cz - 3, DISP)
+  _set(v, cx - 1, hy, cz - 3, MSIGN)
+  _set(v, cx + 1, hy, cz - 3, MSIGN)
+  _set(v, cx - 1, hy, cz - 2, EYE)
+  _set(v, cx + 1, hy, cz - 2, EYE)
+  for sx in (-1, 1):
+    _set(v, cx + sx, hy + 1, cz - 2, QSTAIR)
+    _set(v, cx + sx, hy + 2, cz - 2, QSLAB)
+
+  # Step 8: hind legs
+  for lx in (cx - 2, cx + 2):
+    for y, z in ((by + 3, cz + 4), (by + 2, cz + 5), (by + 1, cz + 5), (by + 1, cz + 4)):
+      _set(v, lx, y, z, MANG)
+    _set(v, lx, by, cz + 4, QSTAIR)
+
+  # Step 9: tail
+  for y, z in ((by + 5, cz + 6), (by + 6, cz + 7), (by + 7, cz + 8), (by + 8, cz + 8)):
+    _set(v, cx, y, z, MANG)
+
+  # Step 10: spine spikes
+  for y, z in ((by + 5, cz + 1), (by + 5, cz + 3), (by + 5, cz + 5), (by + 6, cz + 7), (by + 7, cz + 8)):
+    _set(v, cx, y + 1, z, QSTAIR)
+
+  # Steps 11–14: wings
+  for side in (-1, 1):
+    wx = cx + side * 3
+    for i in range(3):
+      _set(v, wx + side * i, by + 4, cz + 2, MANG)
+    for dz in (-1, 0, 1):
+      _set(v, wx + side * 2, by + 4, cz + 2 + dz, MANG)
+    _set(v, wx + side * 2, by + 5, cz + 1, MANG)
+    _set(v, wx + side * 3, by + 3, cz + 2, MANG)
+    _set(v, wx + side * 2, by + 3, cz + 3, MANG)
+    _set(v, wx + side * 2, by + 4, cz + 2, QUARTZ)
+    _set(v, wx + side * 2, by + 3, cz + 2, QUARTZ)
+
+  return v
+
+
+def _generate_bite_bubblegum_cottage() -> np.ndarray:
+  """
+  Bubblegum Cottage — book dimensions (32³ summary):
+    11×15 L-shaped prismarine base, birch pillars, cherry roof, cottage garden.
+  """
+  PBRICK = _b("prismarine_bricks")
+  PSTAIR = _b("prismarine_brick_stairs")
+  PWALL = _b("prismarine_brick_wall")
+  SBLOG = _b("stripped_birch_log")
+  WOOL = _b("white_wool")
+  DIORITE = _b("diorite")
+  CALCITE = _b("calcite")
+  CHERRY = _b("cherry_planks")
+  CSTAIR = _b("cherry_stairs")
+  CSLAB = _b("cherry_slab")
+  CFENCE = _b("cherry_fence")
+  CTRAP = _b("cherry_trapdoor")
+  BDOOR = _b("birch_door")
+  BTRAP = _b("birch_trapdoor")
+  BFENCE = _b("birch_fence")
+  GPANE = _b("glass_pane")
+  LANTERN = _b("lantern")
+  AZLEAF = _b("flowering_azalea_leaves")
+  VINE = _b("vine")
+  GRASS = _b("grass_block")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  ox, oz, oy = 10, 7, 3
+
+  l_cells: set[tuple[int, int]] = set()
+  for x in range(ox, ox + 11):
+    for z in range(oz, oz + 9):
+      l_cells.add((x, z))
+  for x in range(ox, ox + 4):
+    for z in range(oz + 9, oz + 15):
+      l_cells.add((x, z))
+
+  wall_mats = (WOOL, DIORITE, CALCITE)
+
+  def _perimeter(x: int, z: int) -> bool:
+    return any((x + dx, z + dz) not in l_cells for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+
+  # Step 1 — prismarine L foundation
+  for x, z in l_cells:
+    _set(v, x, oy - 1, z, PBRICK)
+  for x in range(ox, ox + 3):
+    _set(v, x, oy - 1, oz - 1, PSTAIR)
+  for z in range(oz, oz + 6):
+    for x in range(ox, ox + 2):
+      _set(v, x, oy - 1, z, AIR_B)
+
+  # Steps 2–3 — eight pillars and mixed walls
+  pillars = (
+    (ox, oz),
+    (ox + 10, oz),
+    (ox, oz + 8),
+    (ox + 10, oz + 8),
+    (ox, oz + 14),
+    (ox + 3, oz + 14),
+    (ox + 3, oz + 9),
+    (ox + 10, oz + 4),
+  )
+  for px, pz in pillars:
+    for y in range(oy, oy + 5):
+      _set(v, px, y, pz, SBLOG)
+
+  for y in range(oy, oy + 4):
+    for x, z in l_cells:
+      if not _perimeter(x, z):
+        continue
+      if x == ox + 5 and z == oz and y < oy + 3:
+        _set(v, x, y, z, BDOOR if y == oy else AIR_B)
+        continue
+      if z == oz + 4 and x in (ox + 3, ox + 7) and y == oy + 1:
+        _set(v, x, y, z, GPANE)
+        continue
+      _set(v, x, y, z, wall_mats[(x + y + z) % 3])
+
+  # Step 4 — birch log beam ring
+  beam_y = oy + 4
+  for x, z in l_cells:
+    if _perimeter(x, z):
+      _set(v, x, beam_y, z, SBLOG)
+
+  # Steps 5–7 — cherry roof with prismarine trim
+  roof_y = oy + 5
+  for x in range(ox, ox + 11):
+    for z in range(oz, oz + 9):
+      layer = min(x - ox, ox + 10 - x, z - oz, oz + 8 - z)
+      if layer <= 2:
+        _set(v, x, roof_y + layer, z, CHERRY if layer < 2 else CSTAIR)
+      if layer == 0:
+        _set(v, x, roof_y + 3, z, PBRICK)
+  for x in range(ox, ox + 4):
+    for z in range(oz + 9, oz + 15):
+      _set(v, x, roof_y, z, CHERRY)
+      _set(v, x, roof_y + 1, z, CSTAIR)
+  _set(v, ox + 5, roof_y + 4, oz + 4, PSTAIR)
+  _set(v, ox + 5, roof_y + 3, oz + 4, LANTERN)
+
+  # Steps 8–11 — doorway arch, shutters, corner trim
+  _set(v, ox + 4, oy + 2, oz, PWALL)
+  _set(v, ox + 6, oy + 2, oz, PWALL)
+  _set(v, ox + 5, oy + 3, oz, CSLAB)
+  _set(v, ox + 4, oy + 3, oz, CFENCE)
+  _set(v, ox + 6, oy + 3, oz, CFENCE)
+  for wx in (ox + 3, ox + 7):
+    _set(v, wx, oy + 1, oz + 1, CTRAP)
+    _set(v, wx, oy, oz + 1, GRASS)
+    _set(v, wx, oy, oz + 1, CTRAP)
+  for px, pz in pillars:
+    if (px, pz) in ((ox, oz), (ox + 10, oz)):
+      _set(v, px, oy + 4, pz, PWALL)
+      _set(v, px, oy + 5, pz, CFENCE)
+
+  # Steps 12–14 — garden fence and landscaping
+  for x in range(ox - 1, ox + 12):
+    _set(v, x, oy - 1, oz - 2, BFENCE)
+    if x in (ox - 1, ox + 11):
+      _set(v, x, oy, oz - 2, LANTERN)
+  for x in range(ox + 1, ox + 10, 3):
+    for z in range(oz - 1, oz + 3):
+      _set(v, x, oy, z, AZLEAF)
+  for x, z in ((ox + 2, oz + 2), (ox + 8, oz + 6), (ox + 1, oz + 12)):
+    _set(v, x, oy + 4, z, VINE)
+
+  return v
+
+
+def _cross(dx: int, dz: int, r: int = 2) -> bool:
+  if abs(dx) > r or abs(dz) > r:
+    return False
+  return not (abs(dx) == r and abs(dz) == r)
+
+
+def _generate_bite_enchanting_tower() -> np.ndarray:
+  """
+  Enchanting Tower — book dimensions:
+    14-tall 5×5 cross copper tower, quartz pillars/arches, spiral oak trunk.
+  """
+  COPPER = _b("waxed_oxidized_cut_copper")
+  QPILLAR = _b("quartz_pillar")
+  QBLOCK = _b("quartz_block")
+  QSTAIR = _b("quartz_stairs")
+  SDOOR = _b("spruce_door")
+  STRAP = _b("spruce_trapdoor")
+  LADDER = _b("ladder")
+  ENCH = _b("enchanting_table")
+  SHELF = _b("bookshelf")
+  OLOG = _b("oak_log")
+  OLEAF = _b("oak_leaves")
+  LANTERN = _b("lantern")
+  GRASS = _b("grass_block")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  cx, cz, oy = 16, 16, 2
+  th = 14
+
+  # Grass hill pad
+  for x in range(cx - 4, cx + 5):
+    for z in range(cz - 4, cz + 5):
+      if (x - cx) ** 2 + (z - cz) ** 2 <= 16:
+        _set(v, x, oy - 1, z, GRASS)
+
+  # Steps 1–2 — copper cross tower + door + ladder
+  for y in range(oy, oy + th):
+    for dx in range(-2, 3):
+      for dz in range(-2, 3):
+        if not _cross(dx, dz):
+          continue
+        if dz == 2 and dx == 0 and y in (oy, oy + 1):
+          if y == oy:
+            _set(v, cx + dx, y, cz + dz, SDOOR)
+          continue
+        if dx == 0 and dz == 0 and oy <= y < oy + th - 1:
+          _set(v, cx, y, cz, LADDER)
+          continue
+        _set(v, cx + dx, y, cz + dz, COPPER)
+
+  # Step 3 — quartz corner pillars (L shapes at bounding corners)
+  for corner_x, corner_z, px, pz in (
+    (-2, -2, -3, -2),
+    (2, -2, 2, -2),
+    (-2, 2, -3, 2),
+    (2, 2, 2, 2),
+  ):
+    for y in range(oy, oy + th + 2):
+      _set(v, cx + px, y, cz + corner_z, QPILLAR)
+      _set(v, cx + corner_x, y, cz + pz, QPILLAR)
+
+  # Steps 4–5 — quartz roof deck + enchanting setup
+  roof_y = oy + th
+  for dx in range(-2, 3):
+    for dz in range(-2, 3):
+      if _cross(dx, dz):
+        _set(v, cx + dx, roof_y, cz + dz, QBLOCK)
+  _set(v, cx, roof_y, cz, STRAP)
+  for cdx, cdz in ((-2, -2), (2, -2), (-2, 2), (2, 2)):
+    _set(v, cx + cdx, roof_y, cz + cdz, QSTAIR)
+    _set(v, cx + cdx, roof_y - 1, cz + cdz, LANTERN)
+
+  _set(v, cx, roof_y + 1, cz, ENCH)
+  for dx, dz in ((0, -1), (-1, 0), (1, 0)):
+    for y in range(2):
+      _set(v, cx + dx, roof_y + 1 + y, cz + dz, SHELF)
+
+  # Steps 6–7 — quartz arch crown
+  arch_y = roof_y + 3
+  for cdx, cdz in ((-2, -2), (2, -2), (-2, 2), (2, 2)):
+    _set(v, cx + cdx, arch_y, cz + cdz, QPILLAR)
+    _set(v, cx + cdx, arch_y + 1, cz + cdz, QSTAIR)
+    _set(v, cx + cdx, arch_y + 2, cz + cdz, QSTAIR)
+  for dx in range(-1, 2):
+    _set(v, cx + dx, arch_y + 3, cz, QSTAIR)
+
+  # Steps 8–9 — spiral oak trunk and leaves
+  spiral = (
+    (2, 0),
+    (2, 1),
+    (1, 2),
+    (0, 2),
+    (-1, 2),
+    (-2, 1),
+    (-2, 0),
+    (-2, -1),
+    (-1, -2),
+    (0, -2),
+    (1, -2),
+    (2, -1),
+  )
+  for i, y in enumerate(range(oy, oy + th, 2)):
+    dx, dz = spiral[i % len(spiral)]
+    _set(v, cx + dx, y, cz + dz, OLOG)
+    _set(v, cx + dx, y + 1, cz + dz, OLOG)
+    if i % 3 == 0:
+      for lx, lz in ((0, 1), (1, 0), (-1, 0)):
+        _set(v, cx + dx + lx, y + 1, cz + dz + lz, OLEAF)
+
+  return v
+
+
+def _wheel_plate(v: np.ndarray, wx: int, wz: int, y: int, plank: str, stair: str) -> None:
+  for dx in range(3):
+    for dz in range(3):
+      if dx == 1 and dz == 1:
+        continue
+      corner = (dx in (0, 2)) and (dz in (0, 2))
+      _set(v, wx + dx, y, wz + dz, stair if corner else plank)
+
+
+def _generate_bite_pumpkin_carriage() -> np.ndarray:
+  """
+  Pumpkin Carriage — book dimensions:
+    Four 3×3 jungle wheels, green concrete chassis, layered orange wool pumpkin.
+  """
+  JPLANK = _b("jungle_planks")
+  JSTAIR = _b("jungle_stairs")
+  GREEN = _b("green_concrete")
+  ORANGE = _b("orange_wool")
+  ADOOR = _b("acacia_door")
+  VINE = _b("vine")
+  GRASS = _b("grass_block")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  ox, oz, oy = 7, 11, 3
+
+  for x in range(ox - 1, ox + 16):
+    for z in range(oz - 1, oz + 11):
+      _set(v, x, oy - 1, z, GRASS)
+
+  wheel_pts = ((ox, oz), (ox + 12, oz), (ox, oz + 7), (ox + 12, oz + 7))
+  for wx, wz in wheel_pts:
+    _wheel_plate(v, wx, wz, oy, JPLANK, JSTAIR)
+    _wheel_plate(v, wx, wz, oy + 1, JPLANK, JSTAIR)
+
+  # Steps 3–4 — green vine side rails and cross beams
+  for x in range(ox + 1, ox + 12):
+    _set(v, x, oy + 1, oz + 1, GREEN)
+    _set(v, x, oy + 1, oz + 5, GREEN)
+  for z in range(oz + 2, oz + 5):
+    _set(v, ox + 6, oy + 1, z, GREEN)
+    _set(v, ox + 6, oy + 2, z, GREEN)
+
+  pcx, pcz = ox + 5, oz + 2
+  # Steps 5–7 — pumpkin body layers
+  for x in range(pcx, pcx + 3):
+    for z in range(pcz, pcz + 3):
+      _set(v, x, oy + 2, z, ORANGE)
+
+  for x in range(pcx - 1, pcx + 4):
+    for z in range(pcz - 1, pcz + 4):
+      if x in (pcx - 1, pcx + 3) and z in (pcz - 1, pcz + 3):
+        continue
+      _set(v, x, oy + 3, z, ORANGE)
+
+  for y in range(oy + 4, oy + 8):
+    for x in range(pcx - 1, pcx + 4):
+      for z in range(pcz - 1, pcz + 4):
+        if x == pcx + 3 and z in (pcz + 1, pcz + 2) and y < oy + 6:
+          _set(v, x, y, z, ADOOR if y == oy + 4 else AIR_B)
+          continue
+        dist = max(abs(x - pcx - 1), abs(z - pcz - 1))
+        if dist <= 2:
+          _set(v, x, y, z, ORANGE)
+
+  # Step 8 — mirrored roof taper
+  for x in range(pcx - 1, pcx + 4):
+    for z in range(pcz - 1, pcz + 4):
+      if x in (pcx - 1, pcx + 3) and z in (pcz - 1, pcz + 3):
+        continue
+      _set(v, x, oy + 8, z, ORANGE)
+  for x in range(pcx, pcx + 3):
+    for z in range(pcz, pcz + 3):
+      _set(v, x, oy + 9, z, ORANGE)
+
+  # Step 9 — green stem
+  _set(v, pcx + 1, oy + 10, pcz + 1, GREEN)
+  _set(v, pcx + 1, oy + 11, pcz + 1, GREEN)
+  _set(v, pcx + 2, oy + 11, pcz + 1, GREEN)
+
+  # Step 10 — vines
+  for x, z in ((pcx - 1, pcz), (pcx + 3, pcz + 2), (pcx, pcz + 3)):
+    _set(v, x, oy + 5, z, VINE)
+    _set(v, x, oy + 6, z, VINE)
+
+  return v
+
+
+def _generate_bite_royal_frog() -> np.ndarray:
+  """
+  Royal Frog — book dimensions:
+    3×3 cobble frog fountain, granite crown, water mouth channel, pond base.
+  """
+  COBBLE = _b("cobblestone")
+  MOSSY = _b("mossy_cobblestone")
+  CSTAIR = _b("cobblestone_stairs")
+  MSTAIR = _b("mossy_cobblestone_stairs")
+  SMOOTH = _b("smooth_stone")
+  GRANITE = _b("polished_granite")
+  GSTAIR = _b("polished_granite_stairs")
+  SBUTTON = _b("stone_button")
+  BBUTTON = _b("polished_blackstone_button")
+  WATER = _b("water")
+  LILY = _b("lily_pad")
+  GRASS = _b("grass_block")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  cx, cz, oy = 16, 16, 3
+  mix = (COBBLE, MOSSY)
+
+  # Pond and grass pad
+  for x in range(cx - 3, cx + 4):
+    for z in range(cz - 3, cz + 4):
+      _set(v, x, oy - 1, z, WATER if max(abs(x - cx), abs(z - cz)) <= 2 else GRASS)
+  for x in range(cx - 1, cx + 2):
+    for z in range(cz - 1, cz + 2):
+      _set(v, x, oy - 1, z, COBBLE)
+
+  def _body_layer(y: int, mouth: bool, legs: bool) -> None:
+    for dx in range(-1, 2):
+      for dz in range(-1, 2):
+        if mouth and dx == 0 and dz == 1:
+          _set(v, cx + dx, y, cz + dz, WATER if y == oy else AIR_B)
+          continue
+        if legs and dz == 1 and dx in (-1, 1):
+          _set(v, cx + dx, y, cz + dz, MSTAIR if (dx + y) % 2 == 0 else CSTAIR)
+          continue
+        _set(v, cx + dx, y, cz + dz, mix[(dx + dz + y) % 2])
+
+  _body_layer(oy, mouth=True, legs=True)
+  _body_layer(oy + 1, mouth=True, legs=True)
+  _body_layer(oy + 2, mouth=False, legs=False)
+
+  # Head eyes
+  for dx in (-1, 1):
+    _set(v, cx + dx, oy + 3, cz + 1, SMOOTH)
+    _set(v, cx + dx, oy + 3, cz + 2, BBUTTON)
+  for dx in range(-1, 2):
+    _set(v, cx + dx, oy + 3, cz, GRANITE)
+
+  # Crown
+  for dx, dz in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+    _set(v, cx + dx, oy + 4, cz + dz, GSTAIR)
+  _set(v, cx - 1, oy + 4, cz, SBUTTON)
+  _set(v, cx + 1, oy + 4, cz, SBUTTON)
+
+  # Lily pads in pond
+  for x, z in ((cx - 2, cz), (cx + 2, cz - 1), (cx, cz - 2)):
+    _set(v, x, oy, z, LILY)
+
+  return v
+
+
+def _generate_bite_glowing_mushroom() -> np.ndarray:
+  """
+  Glowing Mushroom — book dimensions (32³ summary):
+    Tapered mushroom stem, 15×15 sea lantern cap (scaled), soul lantern fringe.
+  """
+  MSTEM = _b("mushroom_stem")
+  LANTERN = _b("sea_lantern")
+  LBTER = _b("light_blue_terracotta")
+  LBCON = _b("light_blue_concrete")
+  LWOOL = _b("light_blue_wool")
+  WDOOR = _b("warped_door")
+  WFENCE = _b("warped_fence")
+  WSLAB = _b("warped_slab")
+  WPLANK = _b("warped_planks")
+  SOULL = _b("soul_lantern")
+  LADDER = _b("ladder")
+  GRASS = _b("grass_block")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  cx, cz, oy = 16, 16, 2
+
+  for x in range(cx - 6, cx + 7):
+    for z in range(cz - 6, cz + 7):
+      _set(v, x, oy - 1, z, GRASS)
+
+  def _stem_ring(y: int, radius: int, inset: int, height: int, nubs: bool) -> None:
+    for yy in range(y, y + height):
+      for dx in range(-radius, radius + 1):
+        for dz in range(-radius, radius + 1):
+          if not _oct_shell(dx, dz, max(1, radius - inset)):
+            continue
+          if dx == 0 and dz == 0:
+            _set(v, cx, yy, cz, LADDER if yy < y + height - 1 else MSTEM)
+            continue
+          _set(v, cx + dx, yy, cz + dz, MSTEM)
+      if nubs:
+        for dx, dz in ((0, -radius), (0, radius), (-radius, 0), (radius, 0)):
+          _set(v, cx + dx, y + height - 1, cz + dz, MSTEM)
+
+  _stem_ring(oy, 3, 0, 3, False)
+  _stem_ring(oy + 3, 3, 1, 3, True)
+  _stem_ring(oy + 6, 2, 0, 4, True)
+  for y in range(oy + 10, oy + 12):
+    for dx, dz in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+      _set(v, cx + dx, y, cz + dz, MSTEM)
+
+  # Warped entryway (step 10) — gap in stem front
+  for y in range(oy, oy + 2):
+    _set(v, cx, y, cz + 3, AIR_B)
+  _set(v, cx, oy, cz + 3, WDOOR)
+  for dx in (-1, 1):
+    _set(v, cx + dx, oy + 1, cz + 3, WFENCE)
+  _set(v, cx - 1, oy, cz + 3, WSLAB)
+  _set(v, cx + 1, oy, cz + 3, WSLAB)
+  _set(v, cx, oy, cz + 4, WPLANK)
+
+  cap_y = oy + 12
+  cap_mats = (LANTERN, LBTER, LBCON, LWOOL)
+
+  # Steps 5–9 — glowing cap layers (scaled radius 5 ≈ 11 wide)
+  for layer, rad in enumerate((5, 4, 3, 2)):
+    y0 = cap_y + layer * 2
+    depth = 2 if layer < 2 else 1
+    for yy in range(y0, y0 + depth):
+      for dx in range(-rad, rad + 1):
+        for dz in range(-rad, rad + 1):
+          if dx * dx + dz * dz > (rad + 0.5) ** 2:
+            continue
+          edge = dx * dx + dz * dz >= (rad - 0.3) ** 2
+          if layer == 0 and edge:
+            mat = LBTER
+          elif layer == 0:
+            mat = LANTERN
+          else:
+            mat = cap_mats[(layer + dx + dz + yy) % 4]
+          _set(v, cx + dx, yy, cz + dz, mat)
+
+  # Soul lantern fringe under cap
+  for i, (dx, dz, drop) in enumerate(
+    ((-3, 0, 2), (3, 0, 3), (0, -3, 2), (0, 3, 4), (-2, 2, 2))
+  ):
+    for d in range(drop):
+      _set(v, cx + dx, cap_y - 1 - d, cz + dz, WFENCE if d < drop - 1 else SOULL)
+
+  return v
+
+
+def _boot_footprint(ox: int, oz: int) -> set[tuple[int, int]]:
+  cells: set[tuple[int, int]] = set()
+  cx = ox + 3
+  for z in range(oz, oz + 15):
+    t = (z - oz) / 14
+    half_w = 2 + int(round(t * 1))
+    for x in range(cx - half_w, cx + half_w + 1):
+      cells.add((x, z))
+  return cells
+
+
+def _generate_bite_house_in_a_shoe() -> np.ndarray:
+  """
+  House in a Shoe — book dimensions (32³ summary):
+    15-long boot sole, spruce upper, ankle tower, brick roof, chain laces.
+  """
+  PBBLACK = _b("polished_blackstone_bricks")
+  SPRUCE = _b("spruce_planks")
+  SBRICK = _b("stone_bricks")
+  SWALL = _b("stone_brick_wall")
+  SSTAIR = _b("stone_brick_stairs")
+  CRACK = _b("cracked_stone_bricks")
+  BRICK = _b("bricks")
+  BSLAB = _b("brick_slab")
+  ODOOR = _b("oak_door")
+  OTRAP = _b("oak_trapdoor")
+  GPANE = _b("glass_pane")
+  CHAIN = _b("chain")
+  LEAVES = _b("oak_leaves")
+  LANTERN = _b("lantern")
+  GRASS = _b("grass_block")
+  PETAL = _b("pink_petals")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  ox, oz, oy = 10, 8, 3
+  foot = _boot_footprint(ox, oz)
+  cx = ox + 3
+
+  for x, z in foot:
+    _set(v, x, oy - 1, z, PBBLACK)
+
+  # Steps 2–3 — spruce walls and toe stagger
+  for y in range(oy, oy + 3):
+    for x, z in foot:
+      if z == oz and x == cx:
+        continue
+      if y == oy + 1 and z in (oz + 5, oz + 9) and x in (cx - 1, cx + 1):
+        _set(v, x, y, z, GPANE)
+        continue
+      _set(v, x, y, z, SPRUCE)
+
+  front_cells = {(x, z) for x, z in foot if z >= oz + 10}
+  for y in range(oy + 3, oy + 5):
+    inset = y - oy - 2
+    for x, z in front_cells:
+      if x >= cx + 2 - inset:
+        continue
+      _set(v, x, y, z, SPRUCE)
+
+  # Step 4 — ankle circular tower at heel
+  ankle_z = oz
+  for y in range(oy, oy + 4):
+    for dx in range(-2, 3):
+      for dz in range(-1, 2):
+        if dx * dx + dz * dz <= 4:
+          if dz == 0 and dx == 0 and y == oy + 1:
+            _set(v, cx + dx, y, ankle_z + dz, GPANE)
+          else:
+            _set(v, cx + dx, y, ankle_z + dz, SPRUCE)
+
+  # Steps 5–6 — brick roof and stone arch door
+  for x in (cx - 2, cx + 2):
+    for y in range(oy, oy + 4):
+      _set(v, x, y, ankle_z, SWALL)
+  for dx in range(-2, 3):
+    for dz in range(-1, 2):
+      if dx * dx + dz * dz <= 5:
+        _set(v, cx + dx, oy + 4, ankle_z + dz, BRICK)
+        _set(v, cx + dx, oy + 5, ankle_z + dz, BSLAB)
+  _set(v, cx, oy + 4, ankle_z, LEAVES)
+
+  for y in range(oy, oy + 3):
+    _set(v, cx - 1, y, ankle_z, CRACK if y == oy else SBRICK)
+    _set(v, cx + 1, y, ankle_z, SBRICK)
+  _set(v, cx, oy, ankle_z, ODOOR)
+  _set(v, cx - 1, oy + 3, ankle_z, SSTAIR)
+  _set(v, cx + 1, oy + 3, ankle_z, SSTAIR)
+
+  # Steps 7–9 — planters, laces, lanterns
+  for wx in (cx - 1, cx + 1):
+    _set(v, wx, oy, oz + 5, OTRAP)
+    _set(v, wx, oy - 1, oz + 5, GRASS)
+    _set(v, wx, oy, oz + 5, PETAL)
+    _set(v, wx, oy + 1, oz + 5, OTRAP)
+
+  for z in range(oz + 4, oz + 11, 2):
+    _set(v, cx, oy + 3, z, CHAIN)
+    _set(v, cx - 1, oy + 3, z, CHAIN)
+
+  for z in (oz + 3, oz + 8, oz + 12):
+    _set(v, cx + 2, oy + 2, z, CHAIN)
+    _set(v, cx + 2, oy + 1, z, LANTERN)
+
+  for x, z in ((cx - 2, oz + 6), (cx + 2, oz + 11)):
+    _set(v, x, oy + 4, z, LEAVES)
+    _set(v, x, oy + 3, z, LEAVES)
+
+  return v
+
+
+def _extrude_profile(
+  v: np.ndarray,
+  x0: int,
+  oy: int,
+  oz: int,
+  cells: list[tuple[int, int, str]],
+  depth: int = 3,
+) -> None:
+  for y, z, mat in cells:
+    for dx in range(depth):
+      _set(v, x0 + dx, oy + y, oz + z, mat)
+
+
+def _generate_bite_alebrije_horned_chicken() -> np.ndarray:
+  """Alebrije horned chicken — flat profile + mirrored legs and horns."""
+  PURPUR = _b("purpur_block")
+  WPLANK = _b("warped_planks")
+  WSLAB = _b("warped_slab")
+  WSTAIR = _b("warped_stairs")
+  MPLANK = _b("mangrove_planks")
+  MSTAIR = _b("mangrove_stairs")
+  GRASS = _b("grass_block")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  x0, oz, oy = 14, 10, 3
+  body: list[tuple[int, int, str]] = []
+  mats = (PURPUR, WPLANK, WSLAB, WSTAIR)
+  for z in range(8):
+    h = 3 + (z % 2)
+    for y in range(h):
+      body.append((y, z, mats[(y + z) % 4]))
+  for z in range(8, 11):
+    body.append((2, z, MSTAIR))
+    body.append((3, z, WSTAIR if z % 2 == 0 else PURPUR))
+  _extrude_profile(v, x0, oy, oz, body)
+
+  for side in (0, 2):
+    for y, z in ((0, 2), (1, 2), (0, 3)):
+      _set(v, x0 + side, oy + y, oz + z, MPLANK if y == 1 else MSTAIR)
+    for y in range(4, 8):
+      _set(v, x0 + side, oy + y, oz + 5, MPLANK)
+
+  for x in range(x0 - 1, x0 + 4):
+    for z in range(oz - 2, oz + 12):
+      _set(v, x, oy - 1, z, GRASS)
+  return v
+
+
+def _generate_bite_alebrije_winged_horse() -> np.ndarray:
+  """Alebrije winged horse — warped bamboo sandstone profile with wings."""
+  WPLANK = _b("warped_planks")
+  WSTAIR = _b("warped_stairs")
+  BAM = _b("bamboo_mosaic")
+  BSLAB = _b("bamboo_mosaic_slab")
+  RSAND = _b("smooth_red_sandstone")
+  RSSTAIR = _b("smooth_red_sandstone_stairs")
+  GRASS = _b("grass_block")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  x0, oz, oy = 13, 9, 3
+  body: list[tuple[int, int, str]] = []
+  for z in range(11):
+    h = 4 if 2 <= z <= 8 else 3
+    for y in range(h):
+      if z < 2:
+        mat = RSAND
+      elif z < 8:
+        mat = (WPLANK, BAM, RSAND)[(y + z) % 3]
+      else:
+        mat = BAM if y < 2 else WSTAIR
+      body.append((y, z, mat))
+  _extrude_profile(v, x0, oy, oz, body, depth=3)
+
+  for side in (0, 2):
+    for y in range(3):
+      _set(v, x0 + side, oy + y, oz + 4, BAM if y else RSSTAIR)
+    for y, z in ((3, 5), (4, 6), (3, 7)):
+      _set(v, x0 + side, oy + y, oz + z, WPLANK if y == 4 else WSTAIR)
+
+  for x in range(x0 - 1, x0 + 4):
+    for z in range(oz - 1, oz + 12):
+      _set(v, x, oy - 1, z, GRASS)
+  return v
+
+
+def _generate_bite_alebrije_lizard() -> np.ndarray:
+  """Alebrije lizard — long colorful profile with short mirrored legs."""
+  BAM = _b("bamboo_mosaic")
+  BSLAB = _b("bamboo_mosaic_slab")
+  MPLANK = _b("mangrove_planks")
+  MSTAIR = _b("mangrove_stairs")
+  CHERRY = _b("cherry_planks")
+  CSLAB = _b("cherry_slab")
+  CSTAIR = _b("cherry_stairs")
+  GRASS = _b("grass_block")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  x0, oz, oy = 14, 8, 3
+  body: list[tuple[int, int, str]] = []
+  for z in range(13):
+    h = 2 if z in (0, 12) else 3
+    for y in range(h):
+      mat = (BAM, MPLANK, CHERRY, CSTAIR)[(y + z) % 4]
+      body.append((y, z, mat))
+  _extrude_profile(v, x0, oy, oz, body)
+
+  for side in (0, 2):
+    for y in range(2):
+      _set(v, x0 + side, oy + y, oz + 2, MSTAIR)
+      _set(v, x0 + side, oy + y, oz + 9, CSLAB if y else BSLAB)
+
+  for x in range(x0 - 1, x0 + 4):
+    for z in range(oz - 1, oz + 14):
+      _set(v, x, oy - 1, z, GRASS)
+  return v
+
+
+def _banana_wall_height(x: int, ox: int, length: int) -> int:
+  edge = min(x - ox, ox + length - 1 - x)
+  return 3 + min(edge, 2)
+
+
+def _scoop_room(
+  v: np.ndarray,
+  sx: int,
+  sz: int,
+  oy: int,
+  wool: str,
+  glass: str,
+  door_x: int | None,
+) -> None:
+  for x in range(sx, sx + 5):
+    for z in range(sz, sz + 5):
+      _set(v, x, oy, z, wool)
+  for x in range(sx + 1, sx + 4):
+    for z in range(sz + 1, sz + 4):
+      _set(v, x, oy + 1, z, wool)
+  for y in range(oy + 2, oy + 5):
+    for x in range(sx, sx + 5):
+      for z in range(sz, sz + 5):
+        if x in (sx, sx + 4) or z in (sz, sz + 4):
+          if door_x is not None and x == door_x and z == sz and y < oy + 4:
+            continue
+          if x == sx + 2 and z == sz and y == oy + 2:
+            _set(v, x, y, z, glass)
+          else:
+            _set(v, x, y, z, wool)
+  for x in range(sx + 1, sx + 4):
+    for z in range(sz + 1, sz + 4):
+      _set(v, x, oy + 5, z, wool)
+
+
+def _generate_bite_banana_split_base() -> np.ndarray:
+  """
+  Banana-Split Base — book dimensions (32³ summary):
+    18-wide banana shell, three 5×5 wool scoop rooms, cherry toppings.
+  """
+  SAND = _b("smooth_sandstone")
+  SSLAB = _b("smooth_sandstone_slab")
+  SSTAIR = _b("smooth_sandstone_stairs")
+  QUARTZ = _b("quartz_block")
+  WCONC = _b("white_concrete")
+  SPRUCE = _b("spruce_planks")
+  SSLAB_S = _b("spruce_slab")
+  BDOOR = _b("birch_door")
+  OAK = _b("oak_planks")
+  PINK = _b("pink_wool")
+  BLUE = _b("light_blue_wool")
+  YELLOW = _b("yellow_wool")
+  PGLASS = _b("pink_stained_glass")
+  BGLASS = _b("light_blue_stained_glass")
+  YGLASS = _b("yellow_stained_glass")
+  RED = _b("red_wool")
+  WFENCE = _b("warped_fence")
+  SNOW = _b("snow_block")
+  BTNS = (_b("warped_button"), _b("birch_button"), _b("crimson_button"), _b("acacia_button"))
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  ox, oz, oy = 7, 13, 3
+  length = 18
+  z0, z1 = oz, oz + 4
+
+  for x in range(ox, ox + length):
+    h = _banana_wall_height(x, ox, length)
+    for z in (z0, z1):
+      for y in range(oy, oy + h):
+        mat = SAND
+        if y == h - 1 + oy and (x + z) % 3 == 0:
+          mat = SPRUCE if z == z0 else SSLAB_S
+        if x in (ox, ox + length - 1) and y >= oy + h - 2:
+          mat = QUARTZ
+        if y == oy and x in (ox + 2, ox + length - 3):
+          mat = SSTAIR
+        _set(v, x, y, z, mat)
+    if x == ox + 8:
+      _set(v, x, oy, z0, BDOOR)
+
+  for x in range(ox + 1, ox + length - 1):
+    for z in range(z0 + 1, z1):
+      _set(v, x, oy - 1, z, WCONC)
+      _set(v, x, oy, z, OAK)
+
+  for x in range(ox - 1, ox + length + 1):
+    for z in range(oz - 1, oz + 6):
+      if 0 <= x < res and 0 <= z < res and v[x, oy - 1, z] == AIR_B:
+        _set(v, x, oy - 1, z, SNOW)
+
+  _scoop_room(v, ox + 1, oz + 1, oy + 1, PINK, PGLASS, ox + 5)
+  _scoop_room(v, ox + 6, oz + 1, oy + 1, BLUE, BGLASS, ox + 10)
+  _scoop_room(v, ox + 11, oz + 1, oy + 1, YELLOW, YGLASS, None)
+
+  for sx, wool in ((ox + 3, PINK), (ox + 8, BLUE), (ox + 13, YELLOW)):
+    _set(v, sx, oy + 6, oz + 3, RED)
+    _set(v, sx, oy + 7, oz + 3, WFENCE)
+
+  for i, x in enumerate(range(ox + 2, ox + length - 2, 2)):
+    for z in (z0, z1):
+      _set(v, x, oy + 2, z, BTNS[i % 4])
+
+  return v
+
+
+def _tea_trim(dx: int, dz: int) -> str:
+  return _b("yellow_concrete") if (dx + dz) % 2 == 0 else _b("light_blue_terracotta")
+
+
+def _generate_bite_floating_tea_party() -> np.ndarray:
+  """
+  Floating Tea Party — book dimensions (32³ summary):
+    Octagonal teacup pool, floating teapot house, waterfall elevator.
+  """
+  WHITE = _b("white_concrete")
+  YELLOW = _b("yellow_concrete")
+  LTBLUE = _b("light_blue_terracotta")
+  PURPLE = _b("purple_wool")
+  GPANE = _b("blue_stained_glass_pane")
+  WATER = _b("water")
+  LADDER = _b("ladder")
+  GRASS = _b("grass_block")
+  OAK = _b("oak_planks")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  ccx, ccz, coy = 10, 21, 3
+  tcx, tcz, toy = 21, 11, 12
+
+  for x in range(4, 28):
+    for z in range(4, 28):
+      _set(v, x, 1, z, GRASS if (x + z) % 5 else OAK)
+
+  for dx in range(-5, 6):
+    for dz in range(-5, 6):
+      if _oct_floor(dx, dz, 4):
+        _set(v, ccx + dx, 2, ccz + dz, PURPLE)
+
+  for dx in range(-2, 3):
+    for dz in range(-2, 3):
+      if _oct_floor(dx, dz, 2):
+        _set(v, ccx + dx, coy, ccz + dz, WHITE)
+  for y in range(coy + 1, coy + 3):
+    for dx in range(-2, 3):
+      for dz in range(-2, 3):
+        if _oct_shell(dx, dz, 2):
+          _set(v, ccx + dx, y, ccz + dz, WHITE)
+  for dx in range(-2, 3):
+    for dz in range(-2, 3):
+      if _oct_shell(dx, dz, 2):
+        _set(v, ccx + dx, coy + 3, ccz + dz, _tea_trim(dx, dz))
+        if abs(dx) == 2 and dz == 0:
+          _set(v, ccx + dx, coy + 1, ccz + dz, LTBLUE)
+          _set(v, ccx + dx, coy + 2, ccz + dz, LTBLUE)
+  _set(v, ccx, coy + 1, ccz + 3, LADDER)
+  _set(v, ccx, coy + 2, ccz + 3, LADDER)
+  for y in range(coy + 1, coy + 3):
+    for dx in range(-1, 2):
+      for dz in range(-1, 2):
+        _set(v, ccx + dx, y, ccz + dz, WATER)
+
+  for dx in range(-2, 3):
+    for dz in range(-2, 3):
+      if not _oct_floor(dx, dz, 2):
+        continue
+      mat = WHITE if abs(dx) <= 1 and abs(dz) <= 1 else _tea_trim(dx, dz)
+      _set(v, tcx + dx, toy, tcz + dz, mat)
+
+  for y in range(toy + 1, toy + 3):
+    for dx in range(-2, 3):
+      for dz in range(-2, 3):
+        if _oct_shell(dx, dz, 2) and not (abs(dx) == 2 and abs(dz) == 2):
+          if dz == 2 and dx == 0 and y == toy + 1:
+            continue
+          _set(v, tcx + dx, y, tcz + dz, WHITE)
+  for y in range(toy + 3, toy + 6):
+    for dx in range(-2, 3):
+      for dz in range(-2, 3):
+        if _oct_shell(dx, dz, 2):
+          if abs(dz) == 2 and abs(dx) <= 1 and y in (toy + 3, toy + 4):
+            _set(v, tcx + dx, y, tcz + dz, GPANE)
+          elif dz == 2 and dx == 0 and y == toy + 3:
+            continue
+          else:
+            _set(v, tcx + dx, y, tcz + dz, WHITE)
+
+  for dx in range(-2, 3):
+    for dz in range(-2, 3):
+      if _oct_floor(dx, dz, 2):
+        mat = WHITE if abs(dx) <= 1 and abs(dz) <= 1 else _tea_trim(dx, dz)
+        _set(v, tcx + dx, toy + 6, tcz + dz, mat)
+  _set(v, tcx, toy + 7, tcz, YELLOW)
+
+  for y in range(toy + 2, toy + 5):
+    _set(v, tcx - 3, y, tcz, LTBLUE)
+    _set(v, tcx - 3, y, tcz + 1, LTBLUE)
+    _set(v, tcx - 4, y, tcz + 1, LTBLUE)
+  for i in range(4):
+    _set(v, tcx + 2 + i, toy + 2 - min(i, 1), tcz - 1, LTBLUE)
+    _set(v, tcx + 2 + i, toy + 2 - min(i, 1), tcz, LTBLUE)
+  spout_x, spout_z = tcx + 5, tcz
+  _set(v, spout_x, toy + 2, spout_z, WATER)
+  for y in range(coy + 3, toy + 2):
+    _set(v, spout_x, y, spout_z, WATER)
+
+  return v
+
+
+def _dragon_lattice(v: np.ndarray, px: int, pz: int, base_y: int, height: int) -> None:
+  YELLOW = _b("yellow_concrete")
+  WHITE = _b("white_concrete")
+  for y in range(base_y, base_y + height):
+    _set(v, px, y, pz, YELLOW)
+    _set(v, px + 2, y, pz, YELLOW)
+  for y in range(base_y + 1, base_y + height, 2):
+    for x in range(px, px + 3):
+      _set(v, x, y, pz, WHITE)
+
+
+def _rail_torch(v: np.ndarray, x: int, y: int, z: int, powered: bool) -> None:
+  _set(v, x, y, z, _b("powered_rail") if powered else _b("rail"))
+  _set(v, x - 1, y, z, _b("redstone_torch"))
+
+
+def _generate_bite_dragon_roller_coaster() -> np.ndarray:
+  """
+  Dragon Roller Coaster — book dimensions (32³ summary):
+    Copper dragon head station, S-curved body track, twin steep drops.
+  """
+  COPPER = _b("oxidized_cut_copper")
+  BONE = _b("bone_block")
+  BLACK = _b("black_concrete")
+  FROG = _b("ochre_froglight")
+  YELLOW = _b("yellow_concrete")
+  WHITE = _b("white_concrete")
+  RAIL = _b("rail")
+  POWER = _b("powered_rail")
+  RTORCH = _b("redstone_torch")
+  REDSAND = _b("red_sand")
+  OLOG = _b("stripped_oak_log")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  hx, hz, oy = 10, 24, 2
+
+  for x in range(2, 30):
+    for z in range(2, 30):
+      _set(v, x, oy - 1, z, REDSAND)
+
+  head = (
+    (0, 0), (0, 1), (0, 2),
+    (-1, 1), (-1, 2), (1, 1), (1, 2),
+    (-2, 2), (2, 2),
+  )
+  for dx, dz in head:
+    _set(v, hx + dx, oy, hz + dz, COPPER)
+  for dx in (-1, 0, 1):
+    for dz in (1, 2):
+      _set(v, hx + dx, oy + 1, hz + dz, COPPER)
+  for dx in (-1, 0, 1):
+    _set(v, hx + dx, oy + 1, hz, BONE)
+    _set(v, hx + dx, oy, hz, BONE)
+  for dx in (-1, 1):
+    _set(v, hx + dx, oy + 2, hz + 1, COPPER)
+    _set(v, hx + dx, oy + 2, hz + 2, YELLOW)
+  _set(v, hx, oy + 2, hz + 1, BLACK)
+  _set(v, hx - 1, oy + 2, hz + 2, BLACK)
+  _set(v, hx + 1, oy + 2, hz + 2, FROG)
+  for dx in (-1, 0, 1):
+    _set(v, hx + dx, oy + 3, hz, BONE)
+  for z in range(hz - 1, hz - 5, -1):
+    for dx in (-1, 0, 1):
+      _set(v, hx + dx, oy, z, COPPER)
+    if z <= hz - 2:
+      for dx in (-1, 0, 1):
+        _set(v, hx + dx, oy + 1, z, COPPER)
+
+  _rail_torch(v, hx, oy + 1, hz - 1, True)
+  _rail_torch(v, hx, oy + 1, hz - 2, True)
+  _set(v, hx, oy + 1, hz - 3, RAIL)
+  _set(v, hx, oy + 1, hz - 4, RAIL)
+
+  body = [
+    (10, 19), (10, 18), (10, 17), (9, 16), (8, 15), (7, 14), (7, 13),
+    (8, 12), (9, 11), (10, 10), (11, 9), (12, 8), (13, 8), (14, 9),
+    (15, 10), (16, 11), (17, 12), (18, 13), (19, 14), (20, 15),
+  ]
+  for i, (x, z) in enumerate(body):
+    _set(v, x, oy, z, COPPER)
+    _set(v, x, oy + 1, z, COPPER if i % 4 else OLOG)
+    powered = i % 3 != 2
+    _rail_torch(v, x, oy + 2, z, powered)
+
+  peak1_x, peak1_z = 17, 12
+  for step in range(8):
+    y = oy + 2 + step
+    _set(v, peak1_x, y, peak1_z, COPPER)
+    _set(v, peak1_x + 1, y, peak1_z, COPPER)
+    _rail_torch(v, peak1_x, y + 1, peak1_z, step % 4 != 3)
+  _dragon_lattice(v, peak1_x - 1, peak1_z + 1, oy, 8)
+
+  peak2_x, peak2_z = 12, 8
+  for step in range(5):
+    y = oy + 2 + step
+    _set(v, peak2_x, y, peak2_z, COPPER)
+    _rail_torch(v, peak2_x, y + 1, peak2_z, True)
+  _dragon_lattice(v, peak2_x - 1, peak2_z, oy, 5)
+
+  drop_path = [(17, 11), (16, 10), (15, 10), (14, 11), (13, 12), (12, 13),
+               (11, 14), (10, 15), (10, 16), (10, 17), (10, 18), (10, 19),
+               (10, 20), (10, 21), (10, 22), (10, 23), (10, 24)]
+  for i, (x, z) in enumerate(drop_path):
+    y = max(oy + 2, oy + 9 - i // 2)
+    _set(v, x, y, z, COPPER)
+    _rail_torch(v, x, y + 1, z, i % 4 != 1)
+
+  return v
+
+
+def _book_roof_height(x: int, spine_x: int, max_rise: int = 3) -> int:
+  return 1 + min(abs(x - spine_x) // 2, max_rise)
+
+
+def _generate_bite_spellbook_shop() -> np.ndarray:
+  """
+  Spellbook Shop — book dimensions (32³ summary):
+    13×7 pillar frame, birch walls, open-book roof, magic glass plumes.
+  """
+  DLOG = _b("dark_oak_log")
+  SBRICK = _b("stone_bricks")
+  SBSTAIR = _b("stone_brick_stairs")
+  BIRCH = _b("stripped_birch_log")
+  GPANE = _b("glass_pane")
+  DOOR = _b("dark_oak_door")
+  BNEST = _b("bee_nest")
+  HONEY = _b("honeycomb_block")
+  BROWN = _b("brown_concrete")
+  GOLD = _b("gold_block")
+  QUARTZ = _b("smooth_quartz")
+  QSLAB = _b("smooth_quartz_slab")
+  RED = _b("red_wool")
+  LANTERN = _b("lantern")
+  PURPLE = _b("purple_stained_glass_pane")
+  LBLUE = _b("light_blue_stained_glass_pane")
+  YELLOW = _b("yellow_stained_glass_pane")
+  GRASS = _b("grass_block")
+  SBWALL = _b("stone_brick_wall")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  ox, oz, oy = 9, 12, 2
+  width, depth = 13, 7
+  spine_x = ox + width // 2
+  pillars_x = [ox, ox + 4, ox + 8, ox + width - 1]
+  rows_z = [oz, oz + depth - 1]
+
+  for x in range(ox - 1, ox + width + 1):
+    for z in range(oz - 1, oz + depth + 1):
+      _set(v, x, oy - 1, z, GRASS)
+
+  for i, px in enumerate(pillars_x):
+    for j, pz in enumerate(rows_z):
+      height = 6 if i in (0, len(pillars_x) - 1) else 4
+      for y in range(oy, oy + height):
+        _set(v, px, y, pz, DLOG)
+
+  for px in pillars_x:
+    for pz in rows_z:
+      _set(v, px, oy - 1, pz, SBRICK)
+      for side in (-1, 1):
+        if 0 <= px + side < res:
+          _set(v, px + side, oy - 1, pz, SBSTAIR)
+
+  for x in range(ox, ox + width):
+    if x in pillars_x:
+      continue
+    if x in (spine_x - 1, spine_x):
+      continue
+    for z in range(oz, oz + depth):
+      if z in rows_z:
+        continue
+      _set(v, x, oy, z, SBRICK)
+
+  for x in range(ox + 1, ox + width - 1):
+    if x in pillars_x:
+      continue
+    for z in range(oz + 1, oz + depth - 1):
+      for y in (oy + 1, oy + 2):
+        if x in (ox + 2, ox + 6, ox + 10) and y == oy + 2 and z == oz + 3:
+          _set(v, x, y, z, GPANE)
+        else:
+          _set(v, x, y, z, BIRCH)
+  _set(v, spine_x, oy + 1, oz, DOOR)
+  _set(v, spine_x, oy + 2, oz, DOOR)
+  _set(v, spine_x, oy + 3, oz, BIRCH)
+
+  band_y = oy + 3
+  for px in pillars_x:
+    for pz in rows_z:
+      _set(v, px, band_y, pz, BNEST)
+  for x in range(ox + 1, ox + width - 1):
+    for z in (oz, oz + depth - 1):
+      if x not in pillars_x:
+        _set(v, x, band_y, z, HONEY)
+  for px, pz in ((ox, oz), (ox + width - 1, oz), (ox, oz + depth - 1), (ox + width - 1, oz + depth - 1)):
+    _set(v, px + (1 if px == ox else -1), band_y, pz, SBWALL)
+
+  roof_base = oy + 4
+  for x in range(ox - 1, ox + width + 1):
+    for z in range(oz - 1, oz + depth + 1):
+      rise = _book_roof_height(x, spine_x)
+      for layer in range(rise):
+        y = roof_base + layer
+        corner = x in (ox - 1, ox + width) and z in (oz - 1, oz + depth)
+        mat = GOLD if corner and layer == rise - 1 else BROWN
+        _set(v, x, y, z, mat)
+      top_y = roof_base + rise
+      _set(v, x, top_y, z, QSLAB if (x + z) % 2 else QUARTZ)
+
+  _set(v, spine_x, roof_base + 4, oz - 1, RED)
+  _set(v, spine_x, roof_base + 3, oz - 1, RED)
+  for px, pz in ((ox - 1, oz - 1), (ox + width, oz - 1), (ox - 1, oz + depth), (ox + width, oz + depth)):
+    _set(v, px, roof_base - 1, pz, LANTERN)
+
+  plumes = (PURPLE, LBLUE, YELLOW, PURPLE)
+  cx, cz = spine_x, oz + depth // 2
+  for i, (dx, dz, dy) in enumerate(((0, 0, 5), (1, 1, 6), (0, 2, 7), (-1, 1, 6), (-2, 0, 5), (-1, -1, 6))):
+    _set(v, cx + dx, roof_base + dy, cz + dz, plumes[i % len(plumes)])
+
+  return v
+
+
+def _lamp_width(z: int, cz: int) -> int:
+  t = z - cz
+  if t <= 0:
+    return max(1, 2 + t)
+  if t <= 3:
+    return 2
+  if t <= 6:
+    return 3
+  return max(1, 3 - (t - 6))
+
+
+def _generate_bite_genie_lamp_boat() -> np.ndarray:
+  """
+  Genie-Lamp Boat — book dimensions (32³ summary):
+    Yellow terracotta lamp hull, mast sails, interior deck, cobweb spout smoke.
+  """
+  YTER = _b("yellow_terracotta")
+  CYAN = _b("cyan_terracotta")
+  OAK = _b("oak_log")
+  WOOL = _b("white_wool")
+  BARREL = _b("barrel")
+  SMOKER = _b("smoker")
+  CRAFT = _b("crafting_table")
+  COBWEB = _b("cobweb")
+  WATER = _b("water")
+  SAND = _b("sand")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  cx, cz, wl = 16, 13, 13
+
+  for x in range(cx - 8, cx + 9):
+    for z in range(cz - 4, cz + 12):
+      _set(v, x, wl - 4, z, SAND)
+      for y in range(wl - 3, wl + 1):
+        _set(v, x, y, z, WATER)
+
+  for z in range(cz - 2, cz + 9):
+    half = _lamp_width(z, cz)
+    for x in range(cx - half, cx + half + 1):
+      _set(v, x, wl, z, YTER)
+      if z >= cz and z <= cz + 6:
+        _set(v, x, wl + 1, z, CYAN if z in (cz + 2, cz + 3, cz + 4) else YTER)
+      if z >= cz + 1 and z <= cz + 5 and abs(x - cx) == half:
+        _set(v, x, wl + 2, z, YTER)
+      if z in (cz + 1, cz + 5) and abs(x - cx) <= half - 1:
+        _set(v, x, wl + 2, z, YTER)
+      if z in (cz + 2, cz + 3, cz + 4) and abs(x - cx) == half:
+        _set(v, x, wl + 3, z, YTER)
+
+  _set(v, cx + 3, wl + 1, cz + 7, YTER)
+  _set(v, cx + 3, wl + 2, cz + 8, YTER)
+  _set(v, cx + 3, wl + 3, cz + 8, YTER)
+  _set(v, cx + 4, wl + 2, cz + 7, YTER)
+
+  _set(v, cx - 1, wl + 1, cz + 3, BARREL)
+  _set(v, cx + 1, wl + 1, cz + 3, SMOKER)
+  _set(v, cx, wl + 1, cz + 2, CRAFT)
+
+  mast_y = wl + 4
+  for y in range(mast_y, mast_y + 5):
+    _set(v, cx, y, cz + 4, OAK)
+  for x in range(cx - 1, cx + 2):
+    _set(v, x, mast_y + 4, cz + 4, OAK)
+  for x in range(cx - 1, cx + 2):
+    for z in (cz + 3, cz + 5):
+      for dy in range(2):
+        for dx in range(2):
+          _set(v, x + dx - 1, mast_y + 2 + dy, z, WOOL)
+
+  spout_x, spout_z = cx, cz - 2
+  cob_steps = ((0, 0, 3), (1, 0, 4), (1, 1, 5), (2, 1, 6), (2, 2, 7), (1, 3, 8))
+  for dx, dy, dz in cob_steps:
+    _set(v, spout_x + dx, wl + dy, spout_z - dz, COBWEB)
+
+  return v
+
+
+def _generate_bite_emerald_apartments() -> np.ndarray:
+  """
+  Emerald Apartments — book dimensions (32³ summary):
+    Emerald pillar tower, copper glass walls, entrance arch, beacon crown, apartments.
+  """
+  EMERALD = _b("emerald_block")
+  COPPER = _b("waxed_oxidized_cut_copper")
+  GLASS = _b("lime_stained_glass_pane")
+  DEEPS = _b("cobbled_deepslate")
+  DSTAIR = _b("cobbled_deepslate_stairs")
+  DSLAB = _b("cobbled_deepslate_slab")
+  DOOR = _b("birch_door")
+  BEACON = _b("beacon")
+  LANTERN = _b("lantern")
+  GOLD = _b("gold_block")
+  RAWG = _b("raw_gold_block")
+  BAMBOO = _b("bamboo_block")
+  SBAMBOO = _b("stripped_bamboo_block")
+  MOSSY = _b("mossy_cobblestone")
+  PETALS = _b("pink_petals")
+  POPPY = _b("poppy")
+  GRASS = _b("grass_block")
+  CHERRY = _b("cherry_leaves")
+  CRAFT = _b("crafting_table")
+  FURNACE = _b("furnace")
+  BED = _b("red_bed")
+  QSTAIR = _b("quartz_stairs")
+  LCARPET = _b("lime_carpet")
+  GCARPET = _b("green_carpet")
+  BARREL = _b("barrel")
+  CHEST = _b("chest")
+  WATER = _b("water")
+  SOUL = _b("soul_sand")
+  MAGMA = _b("magma_block")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  ox, oz, oy = 12, 13, 2
+  w, d = 7, 5
+  x1, x2 = ox, ox + w - 1
+  z1, z2 = oz, oz + d - 1
+  top = oy + 19
+
+  for x in range(ox - 3, ox + w + 4):
+    for z in range(oz - 6, oz + d + 3):
+      _set(v, x, oy - 1, z, GRASS)
+      if (x + z) % 7 == 0:
+        _set(v, x, oy, z, CHERRY)
+
+  for px, pz in ((x1, z1), (x2, z1), (x1, z2), (x2, z2)):
+    for y in range(oy, top + 1):
+      _set(v, px, y, pz, EMERALD)
+
+  win_x = (ox + 2, ox + 3, ox + 4)
+  for y in range(oy + 2, top - 1):
+    for x in range(ox + 1, ox + w - 1):
+      if x in win_x and y % 3 != 0:
+        _set(v, x, y, z1, GLASS)
+      elif y >= oy + 4:
+        _set(v, x, y, z1, COPPER)
+    for z in range(oz + 1, oz + d - 1):
+      if y <= oy + 5:
+        _set(v, x1, y, z, COPPER if z % 2 else GLASS)
+        _set(v, x2, y, z, COPPER if z % 2 else GLASS)
+    for x in range(ox + 1, ox + w - 1):
+      _set(v, x, y, z2, COPPER)
+
+  for y in range(oy + 3, oy + 10):
+    _set(v, ox + 3, y, oz - 1, EMERALD)
+    _set(v, ox + 2, y, oz - 2, EMERALD)
+    _set(v, ox + 4, y, oz - 2, EMERALD)
+  for x in range(ox + 2, ox + 5):
+    _set(v, x, oy + 2, oz - 1, COPPER)
+  _set(v, ox + 3, oy + 3, oz - 1, DOOR)
+  _set(v, ox + 3, oy + 4, oz - 1, DOOR)
+  _set(v, ox + 2, oy + 3, oz - 1, EMERALD)
+  _set(v, ox + 4, oy + 3, oz - 1, EMERALD)
+
+  for side_x in (ox - 2, ox + w + 1):
+    for y in range(oy + 4, oy + 16):
+      _set(v, side_x, y, oz + 2, EMERALD)
+    for y in range(oy + 4, oy + 10):
+      for z in (oz + 1, oz + 3):
+        _set(v, side_x, y, z, COPPER if y % 3 else GLASS)
+    for z in range(oz, oz + d):
+      _set(v, side_x, oy + 10, z, DEEPS)
+
+  roof_y = top
+  for x in range(ox, ox + w):
+    _set(v, x, roof_y, z1, DSTAIR)
+    _set(v, x, roof_y, z2, DSTAIR)
+    for z in range(z1 + 1, z2):
+      _set(v, x, roof_y, z, DEEPS)
+  for dx in range(-2, 3):
+    for dz in range(-2, 3):
+      if abs(dx) <= 2 and abs(dz) <= 2:
+        _set(v, ox + 3 + dx, roof_y + 1, oz + 2 + dz, EMERALD)
+  for dx in range(-1, 2):
+    for dz in range(-1, 2):
+      _set(v, ox + 3 + dx, roof_y + 2, oz + 2 + dz, EMERALD)
+  _set(v, ox + 3, roof_y + 3, oz + 2, BEACON)
+  for px, pz in ((x1, z1), (x2, z1), (x1, z2), (x2, z2)):
+    _set(v, px, top, pz, LANTERN)
+
+  road_z = oz - 4
+  for x in range(ox + 1, ox + 6):
+    mats = (GOLD, RAWG, BAMBOO, SBAMBOO)
+    _set(v, x, oy, road_z, mats[x % len(mats)])
+    _set(v, x - 1, oy, road_z, MOSSY)
+    _set(v, x + 1, oy, road_z, MOSSY)
+    _set(v, x, oy, road_z - 1, PETALS if x % 2 else POPPY)
+
+  for floor_y in (oy + 4, oy + 8, oy + 12):
+    for x in range(ox + 1, ox + w - 1):
+      for z in range(oz + 1, oz + d - 1):
+        _set(v, x, floor_y, z, DSLAB)
+  _set(v, ox + 2, oy + 5, oz + 2, CRAFT)
+  _set(v, ox + 4, oy + 5, oz + 2, FURNACE)
+  _set(v, ox + 2, oy + 9, oz + 3, BED)
+  _set(v, ox + 4, oy + 9, oz + 2, QSTAIR)
+  _set(v, ox + 3, oy + 9, oz + 2, LCARPET)
+  _set(v, ox + 2, oy + 13, oz + 2, BARREL)
+  _set(v, ox + 4, oy + 13, oz + 3, CHEST)
+  _set(v, ox + 5, oy + 3, oz + 2, WATER)
+  _set(v, ox + 5, oy + 2, oz + 2, SOUL)
+  _set(v, ox + 1, oy + 3, oz + 2, WATER)
+  _set(v, ox + 1, oy + 2, oz + 2, MAGMA)
+
+  return v
+
+
+def _generate_bite_atlantis_abode() -> np.ndarray:
+  """
+  Atlantis Abode — book dimensions (32³ summary):
+    7×7 sandstone underwater tower, pillar balcony, terracotta dome, sea plants.
+  """
+  CSAND = _b("cut_sandstone")
+  SAND = _b("sandstone")
+  SSLAB = _b("sandstone_slab")
+  SWALL = _b("sandstone_wall")
+  SSTAIR = _b("sandstone_stairs")
+  ORANGE = _b("orange_terracotta")
+  YELLOW = _b("yellow_terracotta")
+  YCONC = _b("yellow_concrete")
+  SEA = _b("sea_lantern")
+  WATER = _b("water")
+  SANDF = _b("sand")
+  KELP = _b("kelp")
+  SEAGRASS = _b("seagrass")
+  PICKLE = _b("sea_pickle")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  cx, cz, oy = 16, 16, 5
+  rad = 3
+
+  for x in range(4, 28):
+    for z in range(4, 28):
+      _set(v, x, oy - 5, z, SANDF)
+      for y in range(oy - 4, oy + 16):
+        _set(v, x, y, z, WATER)
+
+  for y in range(oy, oy + 3):
+    for dx in range(-rad, rad + 1):
+      for dz in range(-rad, rad + 1):
+        if not _oct_floor(dx, dz, rad):
+          continue
+        if dz == -rad and abs(dx) <= 1 and y < oy + 2:
+          continue
+        if abs(dx) == rad and dz == 0 and y < oy + 2:
+          continue
+        _set(v, cx + dx, y, cz + dz, CSAND)
+
+  for dx in (-1, 0, 1):
+    _set(v, cx + dx, oy + 2, cz - rad, SSLAB)
+  for dx in (-1, 0, 1):
+    if abs(dx) == rad:
+      _set(v, cx + dx, oy + 1, cz, SWALL)
+  for dx, dz in ((-rad, -rad), (rad, -rad), (-rad, rad), (rad, rad)):
+    _set(v, cx + dx, oy, cz + dz, SSTAIR)
+
+  for y in range(oy + 3, oy + 7):
+    for dx in range(-rad, rad + 1):
+      for dz in range(-rad, rad + 1):
+        if _oct_shell(dx, dz, rad):
+          if dz == -rad and abs(dx) <= 1 and y == oy + 4:
+            continue
+          _set(v, cx + dx, y, cz + dz, SAND if y < oy + 6 else CSAND)
+
+  deck_y = oy + 7
+  for dx in range(-rad, rad + 1):
+    for dz in range(-rad, rad + 1):
+      if _oct_shell(dx, dz, rad):
+        _set(v, cx + dx, deck_y, cz + dz, CSAND)
+        if _oct_shell(dx, dz, rad + 1):
+          _set(v, cx + dx, deck_y, cz + dz, SSTAIR)
+      elif _oct_floor(dx, dz, rad - 1):
+        _set(v, cx + dx, deck_y, cz + dz, ORANGE if (dx + dz) % 2 else YELLOW)
+
+  for dx, dz in ((-rad, 0), (rad, 0), (0, -rad), (0, rad), (-rad, -rad), (rad, rad), (-rad, rad), (rad, -rad)):
+    if not _oct_floor(dx, dz, rad):
+      continue
+    _set(v, cx + dx, deck_y + 1, cz + dz, CSAND if abs(dx) + abs(dz) == rad else SWALL)
+    _set(v, cx + dx, deck_y + 2, cz + dz, SWALL)
+    _set(v, cx + dx, deck_y + 3, cz + dz, CSAND)
+
+  arch_y = deck_y + 4
+  for dx in range(-rad, rad + 1):
+    for dz in range(-rad, rad + 1):
+      if abs(dx) == rad or abs(dz) == rad:
+        _set(v, cx + dx, arch_y, cz + dz, SSTAIR)
+      elif abs(dx) == rad - 1 or abs(dz) == rad - 1:
+        _set(v, cx + dx, arch_y, cz + dz, ORANGE if (dx + dz) % 2 else YELLOW)
+
+  for layer, inset in enumerate((0, 1, 2)):
+    y = arch_y + 1 + layer
+    r = rad - inset
+    for dx in range(-r, r + 1):
+      for dz in range(-r, r + 1):
+        if not _oct_floor(dx, dz, r):
+          continue
+        if abs(dx) == r or abs(dz) == r:
+          mat = CSAND if abs(dx) + abs(dz) == r else ORANGE
+        else:
+          mat = YELLOW if layer % 2 else YCONC
+        _set(v, cx + dx, y, cz + dz, mat)
+  _set(v, cx, arch_y + 4, cz, SEA)
+  for dx, dz in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+    _set(v, cx + dx, arch_y + 4, cz + dz, CSAND)
+
+  for dx, dz, dy in (
+    (0, -4, 0), (1, -3, 1), (-1, -2, 2), (0, 0, 3), (2, 1, 0), (-2, 2, -1),
+  ):
+    _set(v, cx + dx, oy + dy, cz + dz, KELP if (dx + dz) % 2 else SEAGRASS)
+  for dx in range(-2, 3):
+    _set(v, cx + dx, deck_y + 1, cz + rad + 1, PICKLE)
+
+  return v
+
+
+def _palace_tower(
+  v: np.ndarray,
+  tcx: int,
+  tcz: int,
+  oy: int,
+  tall: bool,
+  QUARTZ: str,
+  SQUARTZ: str,
+  QSTAIR: str,
+  PRISM: str,
+  PURPUR: str,
+  CHERRY: str,
+  CSTAIR: str,
+  CSLAB: str,
+  front_dz: int,
+) -> None:
+  body_h = 8 if tall else 5
+  for y in range(2):
+    for dx in range(-2, 3):
+      for dz in range(-2, 3):
+        if _cross(dx, dz, 2):
+          _set(v, tcx + dx, oy + y, tcz + dz, QUARTZ)
+          if abs(dx) == 2 and abs(dz) == 2:
+            _set(v, tcx + dx, oy + y - 1, tcz + dz, QSTAIR)
+  for y in range(oy + 2, oy + 2 + body_h):
+    for dx in range(-2, 3):
+      for dz in range(-2, 3):
+        if _cross(dx, dz, 2) and (abs(dx) == 2 or abs(dz) == 2):
+          _set(v, tcx + dx, y, tcz + dz, SQUARTZ)
+  _set(v, tcx, oy + 3, tcz + front_dz, PRISM)
+  _set(v, tcx, oy + 4, tcz + front_dz, PRISM)
+  for dx, dz in ((-2, -2), (2, -2), (-2, 2), (2, 2)):
+    _set(v, tcx + dx, oy + 2 + body_h, tcz + dz, PRISM)
+  ring_y = oy + 2 + body_h
+  for dx in range(-2, 3):
+    for dz in range(-2, 3):
+      if _cross(dx, dz, 2) and (abs(dx) == 2 or abs(dz) == 2):
+        _set(v, tcx + dx, ring_y, tcz + dz, PURPUR)
+  for layer in range(3):
+    rad = 2 - layer
+    for dx in range(-rad, rad + 1):
+      for dz in range(-rad, rad + 1):
+        if abs(dx) == rad or abs(dz) == rad:
+          mat = CSLAB if (dx + dz + layer) % 2 else CSTAIR
+          _set(v, tcx + dx, ring_y + 1 + layer, tcz + dz, mat if layer > 0 else CHERRY)
+    _set(v, tcx, ring_y + 1 + layer, tcz, CHERRY)
+
+
+def _generate_bite_fairy_tale_palace() -> np.ndarray:
+  """
+  Fairy-Tale Palace — book dimensions (32³ summary):
+    Twin entrance towers, courtyard wings, back towers, cherry central roof, moat.
+  """
+  QUARTZ = _b("quartz_block")
+  SQUARTZ = _b("smooth_quartz")
+  QSTAIR = _b("quartz_stairs")
+  QSLAB = _b("quartz_slab")
+  PRISM = _b("prismarine_wall")
+  PURPUR = _b("purpur_block")
+  CHERRY = _b("cherry_planks")
+  CSTAIR = _b("cherry_stairs")
+  CSLAB = _b("cherry_slab")
+  BGLASS = _b("light_blue_stained_glass_pane")
+  CFENCE = _b("cherry_fence")
+  CYAN = _b("cyan_wool")
+  PINK = _b("pink_wool")
+  BIRCH = _b("birch_log")
+  BLEAVES = _b("birch_leaves")
+  LANTERN = _b("lantern")
+  BOOTS = _b("diamond_boots")
+  WATER = _b("water")
+  GRASS = _b("grass_block")
+  PETALS = _b("pink_petals")
+  AIR_B = AIR
+
+  res = 32
+  v = np.full((res, res, res), AIR_B, dtype=object)
+  oy = 2
+  ft1, ft2 = 10, 17
+  fz = 24
+  bt1, bt2 = 8, 20
+  bz = 10
+
+  for x in range(4, 28):
+    for z in range(4, 28):
+      edge = x in (4, 27) or z in (4, 27)
+      _set(v, x, oy - 1, z, WATER if edge else GRASS)
+      if not edge and (x + z) % 5 == 0:
+        _set(v, x, oy - 1, z, PETALS)
+
+  _palace_tower(v, ft1, fz, oy, False, QUARTZ, SQUARTZ, QSTAIR, PRISM, PURPUR, CHERRY, CSTAIR, CSLAB, -2)
+  _palace_tower(v, ft2, fz, oy, False, QUARTZ, SQUARTZ, QSTAIR, PRISM, PURPUR, CHERRY, CSTAIR, CSLAB, -2)
+
+  arch_y = oy + 5
+  for x in range(ft1 + 1, ft2):
+    _set(v, x, arch_y, fz, PURPUR)
+    _set(v, x, arch_y + 1, fz, QUARTZ)
+  _set(v, ft1 + 2, arch_y + 1, fz, QSLAB)
+  _set(v, ft2 - 2, arch_y + 1, fz, QSLAB)
+
+  for z in range(fz - 1, bz - 1, -1):
+    for x in (ft1 - 2, ft2 + 2):
+      for y in range(oy, oy + 4):
+        _set(v, x, y, z, QUARTZ if y < oy + 2 else SQUARTZ)
+      _set(v, x, oy + 4, z, QSTAIR)
+      _set(v, x, oy + 4, z, QSLAB if z % 2 else QSTAIR)
+
+  _palace_tower(v, bt1, bz, oy, True, QUARTZ, SQUARTZ, QSTAIR, PRISM, PURPUR, CHERRY, CSTAIR, CSLAB, 2)
+  _palace_tower(v, bt2, bz, oy, True, QUARTZ, SQUARTZ, QSTAIR, PRISM, PURPUR, CHERRY, CSTAIR, CSLAB, 2)
+
+  plat_y = oy + 8
+  for x in range(bt1, bt2 + 1):
+    _set(v, x, plat_y, bz, QUARTZ)
+    _set(v, x, plat_y + 1, bz, PURPUR if x % 2 else QUARTZ)
+  for x in range(bt1 + 3, bt2 - 2):
+    _set(v, x, oy + 4, bz + 4, QSLAB)
+
+  back_y = plat_y + 2
+  for x in range(bt1 + 1, bt2):
+    for y in range(back_y, back_y + 4):
+      _set(v, x, y, bz, SQUARTZ if y < back_y + 3 else PURPUR)
+  for x in (bt1 + 4, bt1 + 8, bt1 + 12):
+    for y in range(back_y + 1, back_y + 3):
+      _set(v, x, y, bz, BGLASS)
+  for dx in range(-1, 2):
+    for dy in range(-1, 2):
+      _set(v, bt1 + 8 + dx, back_y + dy, bz, AIR_B)
+
+  roof_y = oy + 5
+  for z in range(bz + 1, fz - 2):
+    for x in range(bt1 + 1, bt2):
+      if (x + z) % 4 == 0:
+        _set(v, x, roof_y + 1, z, BGLASS)
+      mid = abs(x - 14)
+      layer = min(mid // 2, 3)
+      _set(v, x, roof_y + layer, z, CHERRY if layer % 2 else CSTAIR)
+  _set(v, 14, roof_y + 4, 16, CHERRY)
+  _set(v, 15, roof_y + 4, 16, CHERRY)
+
+  for tcx, tcz in ((ft1, fz), (ft2, fz), (bt1, bz), (bt2, bz)):
+    _set(v, tcx, oy + 10, tcz, CFENCE)
+    _set(v, tcx, oy + 11, tcz, CYAN)
+    _set(v, tcx + 1, oy + 11, tcz, PINK)
+    _set(v, tcx, oy + 7, tcz + (2 if tcz == bz else -2), LANTERN)
+
+  for x in range(ft1 - 1, ft2 + 2, 4):
+    _set(v, x, oy, fz - 3, BIRCH)
+    _set(v, x, oy + 1, fz - 3, BLEAVES)
+    _set(v, x + 1, oy + 1, fz - 3, BLEAVES)
+
+  for x in range(ft1 + 1, ft2):
+    _set(v, x, oy, fz + 1, PURPUR)
+  _set(v, 14, oy, fz - 4, BOOTS)
+
+  return v
+
 
 _GENERATORS: dict[str, object] = {
   "bite_creeper": _generate_bite_creeper,
@@ -7989,4 +10154,26 @@ _GENERATORS: dict[str, object] = {
   "bite_villager_island_head": _generate_bite_villager_island_head,
   "bite_giant_grandfather_clock": _generate_bite_giant_grandfather_clock,
   "bite_hot_spring": _generate_bite_hot_spring,
+  "bite_magic_mirror": _generate_bite_magic_mirror,
+  "bite_mermaid_lagoon": _generate_bite_mermaid_lagoon,
+  "bite_giant_beanstalk": _generate_bite_giant_beanstalk,
+  "bite_magicians_hat": _generate_bite_magicians_hat,
+  "bite_ferocious_dragon": _generate_bite_ferocious_dragon,
+  "bite_bubblegum_cottage": _generate_bite_bubblegum_cottage,
+  "bite_enchanting_tower": _generate_bite_enchanting_tower,
+  "bite_pumpkin_carriage": _generate_bite_pumpkin_carriage,
+  "bite_royal_frog": _generate_bite_royal_frog,
+  "bite_glowing_mushroom": _generate_bite_glowing_mushroom,
+  "bite_house_in_a_shoe": _generate_bite_house_in_a_shoe,
+  "bite_alebrije_horned_chicken": _generate_bite_alebrije_horned_chicken,
+  "bite_alebrije_winged_horse": _generate_bite_alebrije_winged_horse,
+  "bite_alebrije_lizard": _generate_bite_alebrije_lizard,
+  "bite_banana_split_base": _generate_bite_banana_split_base,
+  "bite_floating_tea_party": _generate_bite_floating_tea_party,
+  "bite_dragon_roller_coaster": _generate_bite_dragon_roller_coaster,
+  "bite_spellbook_shop": _generate_bite_spellbook_shop,
+  "bite_genie_lamp_boat": _generate_bite_genie_lamp_boat,
+  "bite_emerald_apartments": _generate_bite_emerald_apartments,
+  "bite_fairy_tale_palace": _generate_bite_fairy_tale_palace,
+  "bite_atlantis_abode": _generate_bite_atlantis_abode,
 }

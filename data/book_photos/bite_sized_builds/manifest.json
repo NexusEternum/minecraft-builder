@@ -63,7 +63,29 @@
     "bite_carousel",
     "bite_villager_island_head",
     "bite_giant_grandfather_clock",
-    "bite_hot_spring"
+    "bite_hot_spring",
+    "bite_magic_mirror",
+    "bite_mermaid_lagoon",
+    "bite_giant_beanstalk",
+    "bite_magicians_hat",
+    "bite_ferocious_dragon",
+    "bite_bubblegum_cottage",
+    "bite_enchanting_tower",
+    "bite_pumpkin_carriage",
+    "bite_royal_frog",
+    "bite_glowing_mushroom",
+    "bite_house_in_a_shoe",
+    "bite_alebrije_horned_chicken",
+    "bite_alebrije_winged_horse",
+    "bite_alebrije_lizard",
+    "bite_banana_split_base",
+    "bite_floating_tea_party",
+    "bite_dragon_roller_coaster",
+    "bite_spellbook_shop",
+    "bite_genie_lamp_boat",
+    "bite_emerald_apartments",
+    "bite_fairy_tale_palace",
+    "bite_atlantis_abode"
   ],
   "combinations": [
     "bite_combo_submarine_airlock",
@@ -76,7 +98,12 @@
     "bite_combo_watchtower_skull_cove",
     "bite_combo_bus_racetrack",
     "bite_combo_steamboat_island",
-    "bite_combo_pagoda_hot_spring"
+    "bite_combo_pagoda_hot_spring",
+    "bite_combo_beanstalk_shoe",
+    "bite_combo_frog_lagoon",
+    "bite_combo_atlantis_mushroom",
+    "bite_combo_emerald_library",
+    "bite_combo_palace_carriage"
   ],
   "pending": []
 }

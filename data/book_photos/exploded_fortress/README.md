@@ -31,5 +31,9 @@ Photo drop folder for the castle build book.
 | Hidden Pitfall | `fortress_hidden_pitfall` | done |
 | Arrow Gauntlet | `fortress_arrow_gauntlet` | done |
 | Arrow Catapult | `fortress_arrow_catapult` | done |
+| Oubliette Pit | `fortress_dungeon_oubliette` | done |
+| Castle Forge | `fortress_barracks_forge` | done |
+| Hidden Enchanting Library | `fortress_enchanting_hidden_library` | done |
+| Cathedral Bell Tower | `fortress_cathedral_bell_tower` | done |
 
 Send more pages in chat — same process as Bite-Sized Builds.

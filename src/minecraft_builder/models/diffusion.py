@@ -25,6 +25,7 @@ class DiffusionConfig:
   text_dim: int = 256
   text_vocab_size: int = 128
   text_max_len: int = 128
+  pretrained_text_encoder: str | None = None
 
 
 class GaussianDiffusion(nn.Module):
@@ -38,13 +39,24 @@ class GaussianDiffusion(nn.Module):
     self.config = config
     self.embed_dim = config.embed_dim
     self.num_classes = config.num_classes
+    self.uses_pretrained_text = config.pretrained_text_encoder is not None
 
     self.block_embed = nn.Embedding(config.num_classes, config.embed_dim)
-    self.text_encoder = TextEncoder(
-      vocab_size=config.text_vocab_size,
-      max_len=config.text_max_len,
-      out_dim=config.text_dim,
-    )
+
+    if self.uses_pretrained_text:
+      from .pretrained_text_encoder import PretrainedTextEncoder
+
+      self.text_encoder = PretrainedTextEncoder(
+        out_dim=config.text_dim,
+        model_name=config.pretrained_text_encoder,
+      )
+    else:
+      self.text_encoder = TextEncoder(
+        vocab_size=config.text_vocab_size,
+        max_len=config.text_max_len,
+        out_dim=config.text_dim,
+      )
+
     self.unet = UNet3D(
       in_channels=config.embed_dim,
       base_channels=config.base_channels,

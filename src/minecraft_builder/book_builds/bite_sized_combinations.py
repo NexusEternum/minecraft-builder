@@ -473,6 +473,192 @@ COMBINATION_BUILDS: dict[str, CombinationBuild] = {
       ),
       ("pagoda overlooks rocky hot spring pools", "East Asian tower plus volcanic bath"),
     ),
+    _combo(
+      "bite_combo_beanstalk_shoe",
+      "Beanstalk in a Shoe",
+      ("bite_giant_beanstalk", "bite_house_in_a_shoe"),
+      "Combination challenge 1 — magical beanstalk growing from a giant shoe house",
+      (
+        "a giant boot house with a spiraling warped wart beanstalk rising from the toe, "
+        "white wool cloud platform and chiseled tuff sky towers at the top"
+      ),
+      "fantasy",
+      "plains",
+      (
+        "minecraft:spruce_planks",
+        "minecraft:polished_blackstone_bricks",
+        "minecraft:warped_wart_block",
+        "minecraft:white_wool",
+        "minecraft:chiseled_tuff",
+        "minecraft:tuff_bricks",
+      ),
+      (
+        BuildZone(
+          name="house in a shoe boot",
+          size=(15, 8, 12),
+          materials=("spruce_planks", "polished_blackstone_bricks", "brick_slab", "oak_door"),
+          features=("15 long boot sole", "spruce upper ankle tower", "chain lace detail"),
+          interior=("brick roof cottage room",),
+        ),
+        BuildZone(
+          name="giant beanstalk tower",
+          size=(10, 24, 10),
+          materials=("warped_wart_block", "white_wool", "chiseled_tuff", "tuff_bricks"),
+          features=("spiraling 2 by 2 stalk", "cloud platform", "four tuff sky towers"),
+          interior=("ladder shaft through cloud",),
+        ),
+      ),
+      ("beanstalk sprouts from giant dropped shoe", "fairy tale shoe plus sky beanstalk"),
+    ),
+    _combo(
+      "bite_combo_frog_lagoon",
+      "Frog Lagoon",
+      ("bite_royal_frog", "bite_mermaid_lagoon"),
+      "Combination challenge 2 — royal frog fountain in a mermaid lagoon",
+      (
+        "a mossy prismarine mermaid lagoon with twin pillars and flowering azalea "
+        "trees plus a giant royal frog statue crown fountain centerpiece"
+      ),
+      "aquatic",
+      "jungle",
+      (
+        "minecraft:prismarine",
+        "minecraft:moss_block",
+        "minecraft:water",
+        "minecraft:black_wool",
+        "minecraft:mangrove_planks",
+        "minecraft:flowering_azalea_leaves",
+      ),
+      (
+        BuildZone(
+          name="mermaid lagoon pools",
+          size=(20, 8, 12),
+          materials=("prismarine", "moss_block", "water", "flowering_azalea_leaves"),
+          features=("twin prismarine pillars", "stepped arch lagoon", "azalea trees"),
+          interior=(),
+        ),
+        BuildZone(
+          name="royal frog fountain",
+          size=(7, 8, 7),
+          materials=("black_wool", "mangrove_planks", "gold_block", "dispenser"),
+          features=("giant frog statue", "gold crown", "dispenser mouth fountain"),
+          interior=(),
+        ),
+      ),
+      ("frog fountain in lagoon courtyard", "toad-ally awesome lagoon combo"),
+    ),
+    _combo(
+      "bite_combo_atlantis_mushroom",
+      "Atlantis Mushroom",
+      ("bite_atlantis_abode", "bite_glowing_mushroom"),
+      "Combination challenge 3 — glowing mushroom cap on underwater sandstone tower",
+      (
+        "an underwater cut sandstone atlantis tower with terracotta dome base "
+        "topped by a giant glowing cyan mushroom cap with sea lantern spots "
+        "and warped wart stem"
+      ),
+      "aquatic",
+      "ocean",
+      (
+        "minecraft:cut_sandstone",
+        "minecraft:orange_terracotta",
+        "minecraft:warped_wart_block",
+        "minecraft:cyan_terracotta",
+        "minecraft:sea_lantern",
+        "minecraft:water",
+      ),
+      (
+        BuildZone(
+          name="atlantis sandstone tower",
+          size=(7, 12, 7),
+          materials=("cut_sandstone", "sandstone_wall", "orange_terracotta", "sea_lantern"),
+          features=("circular underwater tower", "pillar balcony ring", "terracotta dome"),
+          interior=(),
+        ),
+        BuildZone(
+          name="glowing mushroom cap",
+          size=(11, 6, 11),
+          materials=("warped_wart_block", "cyan_terracotta", "sea_lantern", "redstone_lamp"),
+          features=("wide glowing mushroom cap", "sea lantern spots", "warped stem"),
+          interior=(),
+        ),
+      ),
+      ("glowing mushroom roof on atlantis tower", "underwater mushroom lighthouse"),
+    ),
+    _combo(
+      "bite_combo_emerald_library",
+      "Emerald Library",
+      ("bite_emerald_apartments", "bite_spellbook_shop"),
+      "Combination challenge 4 — emerald city apartment tower merged with spellbook shop",
+      (
+        "an emerald block art deco skyscraper beside an open book shaped spellbook "
+        "shop with quartz pages cherry roof and gold bamboo yellow road"
+      ),
+      "urban",
+      "cherry_grove",
+      (
+        "minecraft:emerald_block",
+        "minecraft:waxed_oxidized_cut_copper",
+        "minecraft:quartz_block",
+        "minecraft:purpur_block",
+        "minecraft:gold_block",
+        "minecraft:bee_nest",
+      ),
+      (
+        BuildZone(
+          name="emerald apartment tower",
+          size=(9, 20, 7),
+          materials=("emerald_block", "waxed_oxidized_cut_copper", "lime_stained_glass_pane", "beacon"),
+          features=("emerald pillar tower", "copper glass walls", "beacon crown"),
+          interior=("apartment floors with elevators",),
+        ),
+        BuildZone(
+          name="spellbook shop annex",
+          size=(13, 8, 7),
+          materials=("quartz_block", "purpur_block", "brown_concrete", "smooth_quartz", "bee_nest"),
+          features=("open book roof shop", "honeycomb trim", "magic glass plumes"),
+          interior=("enchanted book shop",),
+        ),
+      ),
+      ("emerald tower beside spellbook library", "emerald city book district"),
+    ),
+    _combo(
+      "bite_combo_palace_carriage",
+      "A Lift to the Palace",
+      ("bite_fairy_tale_palace", "bite_pumpkin_carriage"),
+      "Combination challenge 5 — pumpkin carriage waiting at the fairy tale palace",
+      (
+        "a pink quartz fairy tale palace with cherry roof towers water moat and "
+        "purpur bridge plus an orange pumpkin carriage with birch wheels at the gate"
+      ),
+      "fantasy",
+      "cherry_grove",
+      (
+        "minecraft:quartz_block",
+        "minecraft:purpur_block",
+        "minecraft:cherry_planks",
+        "minecraft:orange_concrete",
+        "minecraft:birch_planks",
+        "minecraft:water",
+      ),
+      (
+        BuildZone(
+          name="fairy tale palace",
+          size=(18, 14, 18),
+          materials=("quartz_block", "purpur_block", "cherry_planks", "prismarine_wall"),
+          features=("twin entrance towers", "courtyard wings", "cherry peaked roof", "water moat"),
+          interior=("palace courtyard",),
+        ),
+        BuildZone(
+          name="pumpkin carriage",
+          size=(7, 5, 9),
+          materials=("orange_concrete", "birch_planks", "dark_oak_trapdoor", "lantern"),
+          features=("pumpkin body carriage", "birch wheel arches", "trapdoor seat"),
+          interior=("royal carriage cabin",),
+        ),
+      ),
+      ("pumpkin carriage at palace gate", "ball night palace arrival scene"),
+    ),
   )
 }
 

@@ -34,27 +34,29 @@ def _load_litematic(path: Path) -> np.ndarray:
     if not schem.regions:
         raise ValueError(f"No regions in {path}")
 
-    # Merge all regions into one volume
-    regions = list(schem.regions.values())
-    min_x = min(r.x for r in regions)
-    min_y = min(r.y for r in regions)
-    min_z = min(r.z for r in regions)
-    max_x = max(r.x + r.width - 1 for r in regions)
-    max_y = max(r.y + r.height - 1 for r in regions)
-    max_z = max(r.z + r.length - 1 for r in regions)
+    blocks: list[tuple[int, int, int, str]] = []
+    for region in schem.regions.values():
+        for x, y, z in region.block_positions():
+            block = region[x, y, z]
+            blocks.append((x, y, z, block_state_to_id(block)))
+
+    if not blocks:
+        raise ValueError(f"No blocks in {path}")
+
+    xs = [b[0] for b in blocks]
+    ys = [b[1] for b in blocks]
+    zs = [b[2] for b in blocks]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    min_z, max_z = min(zs), max(zs)
 
     w = max_x - min_x + 1
     h = max_y - min_y + 1
     d = max_z - min_z + 1
     volume = np.full((w, h, d), AIR, dtype=object)
 
-    for region in regions:
-        for x, y, z in region.block_positions():
-            gx = x - min_x
-            gy = y - min_y
-            gz = z - min_z
-            block = region[x, y, z]
-            volume[gx, gy, gz] = block_state_to_id(block)
+    for x, y, z, block_id in blocks:
+        volume[x - min_x, y - min_y, z - min_z] = block_id
 
     return volume
 

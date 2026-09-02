@@ -23,7 +23,7 @@ def load_config(path: Path) -> dict:
 
 @click.command()
 @click.option("--config", default="configs/default.yaml", help="Path to config file")
-@click.option("--synthetic", default=200, help="Number of synthetic samples to generate (0 to skip)")
+@click.option("--synthetic", default=500, help="Number of synthetic samples to generate (0 to skip)")
 @click.option("--raw-dir", default=None, help="Override raw data directory")
 @click.option("--book-builds/--no-book-builds", default=True, help="Generate procedural book builds")
 def main(config: str, synthetic: int, raw_dir: str | None, book_builds: bool):
