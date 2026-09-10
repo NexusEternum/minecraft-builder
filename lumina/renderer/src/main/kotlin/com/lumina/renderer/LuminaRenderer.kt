@@ -5,6 +5,7 @@ import com.lumina.renderer.postfx.PostProcessStack
 import com.lumina.renderer.rt.AccelerationStructureManager
 import com.lumina.renderer.rt.RayTracingPipeline
 import com.lumina.renderer.upscale.UpscaleManager
+import com.lumina.renderer.vulkan.FrameManager
 import com.lumina.renderer.vulkan.VulkanContext
 import com.lumina.scene.graph.SceneGraph
 import org.slf4j.LoggerFactory
@@ -19,7 +20,8 @@ class LuminaRenderer @Inject constructor(
     val rtPipeline: RayTracingPipeline,
     val denoiser: SVGFDenoiser,
     val postProcess: PostProcessStack,
-    val upscale: UpscaleManager
+    val upscale: UpscaleManager,
+    val frameManager: FrameManager
 ) {
     private val log = LoggerFactory.getLogger(LuminaRenderer::class.java)
 
@@ -29,6 +31,7 @@ class LuminaRenderer @Inject constructor(
 
     fun init(title: String = "Lumina - OSRS", width: Int = 1280, height: Int = 720) {
         vkContext.init(title, width, height)
+        frameManager.init()
         upscale.init()
         rtPipeline.init()
         denoiser.init(upscale.renderWidth, upscale.renderHeight)
@@ -47,25 +50,25 @@ class LuminaRenderer @Inject constructor(
             sceneGraph.clearDirty()
         }
 
-        // 1. Path trace / rasterize
-        rtPipeline.recordCommands(upscale.renderWidth, upscale.renderHeight, (frameCount % 2).toInt())
+        val frameCtx = frameManager.beginFrame() ?: return
+        val cmdBuf = frameCtx.commandBuffer
 
-        // 2. Denoise
-        denoiser.denoise(0, 0, 0, 0)
+        // 1. Path trace via hardware RT
+        rtPipeline.recordCommands(cmdBuf, upscale.renderWidth, upscale.renderHeight)
 
-        // 3. Post-processing (volumetrics, bloom, tone mapping)
-        postProcess.execute(0, 0, 0)
+        // 2. Denoise (dispatched on same command buffer in future)
+        // 3. Post-processing
+        // 4. Upscale
 
-        // 4. Upscale to display resolution
-        upscale.upscale(0, 0, 0, 0, lastFrameTimeMs.toFloat() / 1000f, 0f, 0f)
-
-        // 5. Present
+        frameManager.endFrame(frameCtx)
         frameCount++
     }
 
     fun resize(width: Int, height: Int) {
+        frameManager.destroy()
         vkContext.destroy()
         vkContext.init("Lumina - OSRS", width, height)
+        frameManager.init()
         denoiser.resize(upscale.renderWidth, upscale.renderHeight)
         postProcess.resize(upscale.renderWidth, upscale.renderHeight)
     }
@@ -78,6 +81,7 @@ class LuminaRenderer @Inject constructor(
         denoiser.destroy()
         rtPipeline.destroy()
         accelStructure.destroy()
+        frameManager.destroy()
         vkContext.destroy()
         log.info("Lumina renderer destroyed after {} frames", frameCount)
     }

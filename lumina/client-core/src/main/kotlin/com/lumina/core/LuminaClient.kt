@@ -5,6 +5,7 @@ import com.google.inject.Injector
 import com.lumina.core.config.LuminaModule
 import com.lumina.core.game.GameJarLoader
 import com.lumina.core.game.JagexAuthManager
+import com.lumina.core.game.JagexLauncherIPC
 import com.lumina.plugin.*
 import com.lumina.renderer.LuminaRenderer
 import com.lumina.scene.graph.SceneGraph
@@ -36,7 +37,8 @@ class LuminaClient(private val args: Array<String>) {
         renderer = injector.getInstance(LuminaRenderer::class.java)
         val sceneGraph = injector.getInstance(SceneGraph::class.java)
 
-        authenticateJagex()
+        val ipc = injector.getInstance(JagexLauncherIPC::class.java)
+        ipc.initialize(args)
 
         val gameJarLoader = injector.getInstance(GameJarLoader::class.java)
         try {
@@ -66,18 +68,6 @@ class LuminaClient(private val args: Array<String>) {
 
         running = true
         mainLoop()
-    }
-
-    private fun authenticateJagex() {
-        if (authManager.authenticateFromArgs(args)) {
-            log.info("Jagex account authenticated")
-            return
-        }
-        if (authManager.authenticateFromLauncher()) {
-            log.info("Jagex account authenticated via environment")
-            return
-        }
-        log.info("No Jagex credentials -- legacy login will be used")
     }
 
     private fun mainLoop() {

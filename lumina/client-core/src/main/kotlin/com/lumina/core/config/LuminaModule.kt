@@ -5,12 +5,15 @@ import com.google.inject.Provides
 import com.google.inject.name.Names
 import com.lumina.plugin.ConfigManager
 import com.lumina.plugin.EventBus
+import com.lumina.core.game.JagexLauncherIPC
 import com.lumina.renderer.LuminaRenderer
 import com.lumina.renderer.denoise.SVGFDenoiser
 import com.lumina.renderer.postfx.PostProcessStack
 import com.lumina.renderer.rt.AccelerationStructureManager
 import com.lumina.renderer.rt.RayTracingPipeline
 import com.lumina.renderer.upscale.UpscaleManager
+import com.lumina.renderer.vulkan.FrameManager
+import com.lumina.renderer.vulkan.ShaderCompiler
 import com.lumina.renderer.vulkan.VulkanContext
 import com.lumina.scene.extract.OsrsSceneExtractor
 import com.lumina.scene.graph.SceneGraph
@@ -41,10 +44,13 @@ class LuminaModule(
         bind(SVGFDenoiser::class.java).asEagerSingleton()
         bind(PostProcessStack::class.java).asEagerSingleton()
         bind(UpscaleManager::class.java).asEagerSingleton()
+        bind(FrameManager::class.java).asEagerSingleton()
+        bind(ShaderCompiler::class.java).asEagerSingleton()
         bind(LuminaRenderer::class.java).asEagerSingleton()
         bind(OsrsSceneExtractor::class.java).asEagerSingleton()
         bind(ModelPackManager::class.java).asEagerSingleton()
         bind(ConfigManager::class.java).asEagerSingleton()
+        bind(JagexLauncherIPC::class.java).asEagerSingleton()
     }
 
     @Provides @Singleton
