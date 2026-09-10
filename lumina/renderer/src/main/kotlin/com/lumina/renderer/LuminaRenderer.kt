@@ -5,7 +5,6 @@ import com.lumina.renderer.postfx.PostProcessStack
 import com.lumina.renderer.rt.AccelerationStructureManager
 import com.lumina.renderer.rt.RayTracingPipeline
 import com.lumina.renderer.upscale.UpscaleManager
-import com.lumina.renderer.upscale.UpscaleMode
 import com.lumina.renderer.scene.SceneBufferManager
 import com.lumina.renderer.vulkan.FrameManager
 import com.lumina.renderer.vulkan.RenderTargets
@@ -15,10 +14,8 @@ import com.lumina.scene.graph.SceneGraph
 import org.lwjgl.system.MemoryStack
 import org.lwjgl.vulkan.KHRSwapchain.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
 import org.lwjgl.vulkan.VK13.*
-import org.lwjgl.vulkan.VkClearColorValue
 import org.lwjgl.vulkan.VkImageBlit
 import org.lwjgl.vulkan.VkImageMemoryBarrier
-import org.lwjgl.vulkan.VkImageSubresourceRange
 import org.slf4j.LoggerFactory
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -85,81 +82,37 @@ class LuminaRenderer @Inject constructor(
         lastFrameTimeMs = (now - lastFrameNanos) / 1_000_000.0
         lastFrameNanos = now
 
-        if (frameCount == 0L) {
-            log.info("=== DIAGNOSTIC MODE: clearing swapchain to cycling color ===")
-        }
-        if (frameCount % 60 == 0L) {
-            log.info("Frame {} (swapchain images: {}, format: {})",
-                frameCount, vkContext.swapchainImages.size, vkContext.swapchainFormat)
+        if (sceneGraph.dirty) {
+            accelStructure.rebuildTLAS()
+            sceneGraph.clearDirty()
+            descriptorsDirty = true
         }
 
-        val frameCtx = frameManager.beginFrame()
-        if (frameCtx == null) {
-            log.warn("beginFrame returned null (swapchain out of date?)")
-            return
-        }
+        updateAllDescriptors()
+
+        val frameCtx = frameManager.beginFrame() ?: return
         val cmdBuf = frameCtx.commandBuffer
-        val swapchainImage = vkContext.swapchainImages.getOrNull(frameCtx.imageIndex)
-        if (swapchainImage == null) {
-            log.error("No swapchain image at index {}", frameCtx.imageIndex)
-            return
+
+        renderTargets.transitionAllToGeneral(cmdBuf)
+
+        if (vkContext.rtSupported) {
+            rtPipeline.recordCommands(cmdBuf, renderTargets.renderWidth, renderTargets.renderHeight)
+            insertRTToComputeBarrier(cmdBuf)
         }
 
-        MemoryStack.stackPush().use { stack ->
-            val barrier = VkImageMemoryBarrier.calloc(1, stack)
-            barrier.get(0)
-                .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
-                .oldLayout(VK_IMAGE_LAYOUT_UNDEFINED)
-                .newLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
-                .srcAccessMask(0)
-                .dstAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
-                .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                .image(swapchainImage)
-            barrier.get(0).subresourceRange()
-                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
-                .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1)
+        postProcess.recordTonemapOnly(cmdBuf, vkContext.width, vkContext.height)
 
-            vkCmdPipelineBarrier(cmdBuf,
-                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                0, null, null, barrier)
-
-            val t = (frameCount % 300).toFloat() / 300f
-            val clearColor = VkClearColorValue.calloc(stack)
-            clearColor.float32(0, 0.1f + t * 0.3f)
-            clearColor.float32(1, 0.2f + t * 0.1f)
-            clearColor.float32(2, 0.4f + (1f - t) * 0.4f)
-            clearColor.float32(3, 1.0f)
-
-            val range = VkImageSubresourceRange.calloc(1, stack)
-            range.get(0)
-                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
-                .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1)
-
-            vkCmdClearColorImage(cmdBuf, swapchainImage,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, clearColor, range)
-
-            val presentBarrier = VkImageMemoryBarrier.calloc(1, stack)
-            presentBarrier.get(0)
-                .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
-                .oldLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
-                .newLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
-                .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
-                .dstAccessMask(0)
-                .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                .image(swapchainImage)
-            presentBarrier.get(0).subresourceRange()
-                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
-                .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1)
-
-            vkCmdPipelineBarrier(cmdBuf,
-                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                0, null, null, presentBarrier)
-        }
+        copyToSwapchain(cmdBuf, frameCtx.imageIndex)
 
         frameManager.endFrame(frameCtx)
         frameCount++
+
+        if (frameCount <= 3 || frameCount % 300 == 0L) {
+            log.info("Frame {} rendered (RT: {}, render: {}x{}, display: {}x{})",
+                frameCount, vkContext.rtSupported,
+                renderTargets.renderWidth, renderTargets.renderHeight,
+                vkContext.width, vkContext.height)
+        }
     }
 
     private fun insertRTToComputeBarrier(cmdBuf: org.lwjgl.vulkan.VkCommandBuffer) {
