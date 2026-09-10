@@ -43,19 +43,42 @@ class VulkanContext {
 
     fun init(title: String = "Lumina", w: Int = 1280, h: Int = 720, enableValidation: Boolean = false) {
         width = w; height = h
-        check(glfwInit()) { "Failed to init GLFW" }
-        check(GLFWVulkan.glfwVulkanSupported()) { "Vulkan not supported" }
+
+        log.info("Initializing GLFW...")
+        if (!glfwInit()) {
+            log.error("Failed to initialize GLFW. Make sure your graphics drivers are installed.")
+            throw RuntimeException("Failed to init GLFW")
+        }
+
+        if (!GLFWVulkan.glfwVulkanSupported()) {
+            log.error("Vulkan is not supported on this system.")
+            log.error("Make sure you have up-to-date GPU drivers installed:")
+            log.error("  NVIDIA: https://www.nvidia.com/Download/index.aspx")
+            log.error("  AMD:    https://www.amd.com/en/support")
+            throw RuntimeException("Vulkan not supported by GLFW")
+        }
+        log.info("GLFW initialized, Vulkan supported")
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API)
         glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE)
         window = glfwCreateWindow(w, h, title, NULL, NULL)
-        check(window != NULL) { "Failed to create window" }
+        if (window == NULL) {
+            log.error("Failed to create window ({}x{})", w, h)
+            throw RuntimeException("Failed to create GLFW window")
+        }
+        log.info("Window created ({}x{})", w, h)
 
+        log.info("Creating Vulkan instance...")
         createInstance(title, enableValidation)
+        log.info("Creating surface...")
         createSurface()
+        log.info("Picking physical device (GPU)...")
         pickPhysicalDevice()
+        log.info("Creating logical device...")
         createLogicalDevice(enableValidation)
+        log.info("Creating swapchain...")
         createSwapchain()
+        log.info("Creating command pool...")
         createCommandPool()
 
         log.info("Vulkan initialized: {} (RT: {})", getDeviceName(), rtSupported)
@@ -273,7 +296,7 @@ class VulkanContext {
                 .imageColorSpace(colorSpace)
                 .imageExtent(extent)
                 .imageArrayLayers(1)
-                .imageUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT or VK_IMAGE_USAGE_STORAGE_BIT)
+                .imageUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT or VK_IMAGE_USAGE_TRANSFER_DST_BIT)
                 .preTransform(caps.currentTransform())
                 .compositeAlpha(VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
                 .presentMode(VK_PRESENT_MODE_FIFO_KHR)
