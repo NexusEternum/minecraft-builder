@@ -47,7 +47,7 @@ class SceneBufferManager @Inject constructor(
 
         val vertexSize = totalVertexFloats.toLong() * 4
         val indexSize = totalIndices.toLong() * 4
-        val matSize = meshNodes.size.toLong() * 48 // 12 floats per material
+        val matSize = meshNodes.size.toLong() * 32 // 8 floats (2 vec4s) per material
 
         val vertBuf = VulkanMemory.createBuffer(ctx, vertexSize,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT or VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR or
@@ -78,9 +78,10 @@ class SceneBufferManager @Inject constructor(
             for (f in mesh.vertexData) vertData.putFloat(f)
             for (idx in mesh.indexData) idxData.putInt(idx + vertexOffset / 8)
 
-            matData.putFloat(mat.albedo[0]).putFloat(mat.albedo[1]).putFloat(mat.albedo[2]).putFloat(1f)
-            matData.putFloat(mat.roughness).putFloat(mat.metallic).putFloat(0f).putFloat(0f)
-            matData.putFloat(mat.emissive[0]).putFloat(mat.emissive[1]).putFloat(mat.emissive[2]).putFloat(0f)
+            // vec4: albedo.xyz, roughness
+            matData.putFloat(mat.albedo[0]).putFloat(mat.albedo[1]).putFloat(mat.albedo[2]).putFloat(mat.roughness)
+            // vec4: emissive.xyz, metallic
+            matData.putFloat(mat.emissive[0]).putFloat(mat.emissive[1]).putFloat(mat.emissive[2]).putFloat(mat.metallic)
 
             val vertByteOffset = vertexOffset * 4
             val idxByteOffset = indexOffset * 4

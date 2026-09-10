@@ -1,4 +1,5 @@
 #version 460
+#extension GL_EXT_scalar_block_layout : require
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -6,12 +7,12 @@ layout(binding = 0, rgba16f) uniform image2D sceneColor;
 layout(binding = 1, r32f) uniform image2D depthBuffer;
 layout(binding = 2, rgba16f) uniform image2D outputImage;
 
-layout(push_constant) uniform Params {
-    vec3 sunDirection;
+layout(push_constant, scalar) uniform Params {
+    float sunDirX, sunDirY, sunDirZ;
     float fogDensity;
-    vec3 fogColor;
+    float fogColorR, fogColorG, fogColorB;
     float fogHeight;
-    vec3 sunColor;
+    float sunColorR, sunColorG, sunColorB;
     float godRayIntensity;
     int numSteps;
     float scatteringCoeff;
@@ -53,12 +54,13 @@ void main() {
         float extinction = density * scatteringCoeff;
 
         // In-scattering from sun
-        float cosAngle = dot(rayDir, sunDirection);
+        vec3 sunDir = vec3(sunDirX, sunDirY, sunDirZ);
+        float cosAngle = dot(rayDir, sunDir);
         float phase = hgPhase(cosAngle, 0.7);
-        vec3 inScatter = sunColor * phase * density * godRayIntensity;
+        vec3 inScatter = vec3(sunColorR, sunColorG, sunColorB) * phase * density * godRayIntensity;
 
         // Ambient in-scattering
-        inScatter += fogColor * density * 0.1;
+        inScatter += vec3(fogColorR, fogColorG, fogColorB) * density * 0.1;
 
         fogAccum += inScatter * transmittance * stepSize;
         transmittance *= exp(-extinction * stepSize);

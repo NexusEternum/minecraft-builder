@@ -405,6 +405,8 @@ class RayTracingPipeline @Inject constructor(
     }
 
     private var cameraBuffer: VulkanBuffer? = null
+    private var frameCount: Long = 0
+    private val prevViewProj = FloatArray(16) { if (it % 5 == 0) 1f else 0f }
 
     fun updateCamera(
         posX: Float, posY: Float, posZ: Float,
@@ -412,25 +414,125 @@ class RayTracingPipeline @Inject constructor(
         nearPlane: Float, farPlane: Float,
         jitterX: Float = 0f, jitterY: Float = 0f
     ) {
+        val bufSize = 224L // 3 mat4(192) + vec3(12) + float(4) + 3 uint(12) + float(4) = 224
         if (cameraBuffer == null) {
-            cameraBuffer = VulkanMemory.createBuffer(ctx, 64,
+            cameraBuffer = VulkanMemory.createBuffer(ctx, bufSize,
                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
         }
 
+        val aspect = ctx.width.toFloat() / ctx.height.toFloat().coerceAtLeast(1f)
+        val fovRad = Math.toRadians(fov.toDouble()).toFloat()
+
+        val viewInv = computeViewInverse(posX, posY, posZ, pitch, yaw)
+        val projInv = computeProjInverse(fovRad, aspect, nearPlane, farPlane)
+
+        val view = invertMat4(viewInv)
+        val proj = invertMat4(projInv)
+        val viewProj = multiplyMat4(proj, view)
+
         val dev = ctx.device!!
         MemoryStack.stackPush().use { stack ->
             val pData = stack.mallocPointer(1)
-            vkMapMemory(dev, cameraBuffer!!.memory, 0, 64, 0, pData)
-            val mapped = pData.getByteBuffer(0, 64)
-            mapped.putFloat(posX).putFloat(posY).putFloat(posZ).putFloat(fov)
-            mapped.putFloat(pitch).putFloat(yaw).putFloat(nearPlane).putFloat(farPlane)
-            mapped.putFloat(jitterX).putFloat(jitterY)
-            mapped.putFloat(0f).putFloat(0f) // padding
-            mapped.putInt(spp).putInt(maxBounces)
-            mapped.putInt(0).putInt(0) // reserved
+            vkMapMemory(dev, cameraBuffer!!.memory, 0, bufSize, 0, pData)
+            val mapped = pData.getByteBuffer(0, bufSize.toInt())
+
+            for (f in viewInv) mapped.putFloat(f)
+            for (f in projInv) mapped.putFloat(f)
+            for (f in prevViewProj) mapped.putFloat(f)
+            mapped.putFloat(posX).putFloat(posY).putFloat(posZ)
+            mapped.putFloat(fov)
+            mapped.putInt(frameCount.toInt())
+            mapped.putInt(spp)
+            mapped.putInt(maxBounces)
+            mapped.putFloat(0.5f) // time (default noon)
+
             vkUnmapMemory(dev, cameraBuffer!!.memory)
         }
+
+        System.arraycopy(viewProj, 0, prevViewProj, 0, 16)
+        frameCount++
+    }
+
+    private fun computeViewInverse(px: Float, py: Float, pz: Float, pitch: Float, yaw: Float): FloatArray {
+        val cp = kotlin.math.cos(pitch); val sp = kotlin.math.sin(pitch)
+        val cy = kotlin.math.cos(yaw);   val sy = kotlin.math.sin(yaw)
+
+        // Column-major: R_yaw * R_pitch, then translate by position
+        return floatArrayOf(
+            cy,      sp * sy,   -cp * sy, 0f,
+            0f,      cp,         sp,      0f,
+            sy,     -sp * cy,    cp * cy, 0f,
+            px,      py,         pz,      1f
+        )
+    }
+
+    private fun computeProjInverse(fovRad: Float, aspect: Float, near: Float, far: Float): FloatArray {
+        val tanHalfFov = kotlin.math.tan(fovRad * 0.5f)
+        val a = 1f / (aspect * tanHalfFov)
+        val b = 1f / tanHalfFov
+        val c = -(far + near) / (far - near)
+        val d = -(2f * far * near) / (far - near)
+        // Inverse of perspective projection (column-major)
+        return floatArrayOf(
+            1f / a, 0f,     0f,     0f,
+            0f,     1f / b, 0f,     0f,
+            0f,     0f,     0f,     1f / d,
+            0f,     0f,     -1f,    c / d
+        )
+    }
+
+    private fun invertMat4(m: FloatArray): FloatArray {
+        // For view inverse: input IS the inverse, so invert it to get the forward matrix
+        val inv = FloatArray(16)
+        val m00=m[0]; val m01=m[4]; val m02=m[8];  val m03=m[12]
+        val m10=m[1]; val m11=m[5]; val m12=m[9];  val m13=m[13]
+        val m20=m[2]; val m21=m[6]; val m22=m[10]; val m23=m[14]
+        val m30=m[3]; val m31=m[7]; val m32=m[11]; val m33=m[15]
+
+        val a2323 = m22*m33 - m23*m32; val a1323 = m21*m33 - m23*m31
+        val a1223 = m21*m32 - m22*m31; val a0323 = m20*m33 - m23*m30
+        val a0223 = m20*m32 - m22*m30; val a0123 = m20*m31 - m21*m30
+        val a2313 = m12*m33 - m13*m32; val a1313 = m11*m33 - m13*m31
+        val a1213 = m11*m32 - m12*m31; val a2312 = m12*m23 - m13*m22
+        val a1312 = m11*m23 - m13*m21; val a1212 = m11*m22 - m12*m21
+        val a0313 = m10*m33 - m13*m30; val a0213 = m10*m32 - m12*m30
+        val a0312 = m10*m23 - m13*m20; val a0212 = m10*m22 - m12*m20
+        val a0113 = m10*m31 - m11*m30; val a0112 = m10*m21 - m11*m20
+
+        var det = m00*(m11*a2323 - m12*a1323 + m13*a1223) -
+                  m01*(m10*a2323 - m12*a0323 + m13*a0223) +
+                  m02*(m10*a1323 - m11*a0323 + m13*a0123) -
+                  m03*(m10*a1223 - m11*a0223 + m12*a0123)
+        if (kotlin.math.abs(det) < 1e-10f) return FloatArray(16) { if (it % 5 == 0) 1f else 0f }
+        det = 1f / det
+
+        inv[0] = det *  (m11*a2323 - m12*a1323 + m13*a1223)
+        inv[1] = det * -(m10*a2323 - m12*a0323 + m13*a0223)
+        inv[2] = det *  (m10*a1323 - m11*a0323 + m13*a0123)
+        inv[3] = det * -(m10*a1223 - m11*a0223 + m12*a0123)
+        inv[4] = det * -(m01*a2323 - m02*a1323 + m03*a1223)
+        inv[5] = det *  (m00*a2323 - m02*a0323 + m03*a0223)
+        inv[6] = det * -(m00*a1323 - m01*a0323 + m03*a0123)
+        inv[7] = det *  (m00*a1223 - m01*a0223 + m02*a0123)
+        inv[8] = det *  (m01*a2313 - m02*a1313 + m03*a1213)
+        inv[9] = det * -(m00*a2313 - m02*a0313 + m03*a0213)
+        inv[10]= det *  (m00*a1313 - m01*a0313 + m03*a0113)
+        inv[11]= det * -(m00*a1213 - m01*a0213 + m02*a0113)
+        inv[12]= det * -(m01*a2312 - m02*a1312 + m03*a1212)
+        inv[13]= det *  (m00*a2312 - m02*a0312 + m03*a0212)
+        inv[14]= det * -(m00*a1312 - m01*a0312 + m03*a0112)
+        inv[15]= det *  (m00*a1212 - m01*a0212 + m02*a0112)
+        return inv
+    }
+
+    private fun multiplyMat4(a: FloatArray, b: FloatArray): FloatArray {
+        val r = FloatArray(16)
+        for (col in 0..3) for (row in 0..3) {
+            r[col * 4 + row] = a[row] * b[col * 4] + a[4 + row] * b[col * 4 + 1] +
+                               a[8 + row] * b[col * 4 + 2] + a[12 + row] * b[col * 4 + 3]
+        }
+        return r
     }
 
     fun getCameraBuffer(): VulkanBuffer? = cameraBuffer
@@ -448,7 +550,6 @@ class RayTracingPipeline @Inject constructor(
         if (sbtBuffer != 0L) { vkDestroyBuffer(dev, sbtBuffer, null); vkFreeMemory(dev, sbtMemory, null) }
         cameraBuffer?.let { VulkanMemory.destroyBuffer(ctx, it) }
         cameraBuffer = null
-        shaderCompiler.destroy()
         log.info("RT pipeline destroyed")
     }
 }

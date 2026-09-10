@@ -8,8 +8,7 @@ layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
 layout(binding = 5, set = 0, scalar) buffer VertexBuffer { float vertices[]; };
 layout(binding = 6, set = 0, scalar) buffer IndexBuffer { uint indices[]; };
 layout(binding = 7, set = 0, scalar) buffer MaterialBuffer {
-    vec4 albedoRoughness[];  // xyz=albedo, w=roughness
-    vec4 emissiveMetallic[]; // xyz=emissive, w=metallic
+    vec4 materialData[]; // even indices: xyz=albedo, w=roughness; odd indices: xyz=emissive, w=metallic
 };
 
 hitAttributeEXT vec2 attribs;
@@ -40,8 +39,8 @@ Vertex unpackVertex(uint index) {
     return v;
 }
 
-uint pcgHash(uint input) {
-    uint state = input * 747796405u + 2891336453u;
+uint pcgHash(uint v) {
+    uint state = v * 747796405u + 2891336453u;
     uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
     return (word >> 22u) ^ word;
 }
@@ -125,14 +124,14 @@ void main() {
     vec3 worldPos = v0.pos * bary.x + v1.pos * bary.y + v2.pos * bary.z;
     vec3 normal = normalize(v0.normal * bary.x + v1.normal * bary.y + v2.normal * bary.z);
 
-    worldPos = gl_ObjectToWorldEXT * vec4(worldPos, 1.0);
-    normal = normalize(gl_ObjectToWorldEXT * vec4(normal, 0.0));
+    worldPos = vec3(gl_ObjectToWorldEXT * vec4(worldPos, 1.0));
+    normal = normalize(vec3(gl_ObjectToWorldEXT * vec4(normal, 0.0)));
 
     uint matIdx = gl_InstanceCustomIndexEXT;
-    vec3 albedo = albedoRoughness[matIdx].xyz;
-    float roughness = albedoRoughness[matIdx].w;
-    vec3 emissive = emissiveMetallic[matIdx].xyz;
-    float metallic = emissiveMetallic[matIdx].w;
+    vec3 albedo = materialData[matIdx * 2u].xyz;
+    float roughness = materialData[matIdx * 2u].w;
+    vec3 emissive = materialData[matIdx * 2u + 1u].xyz;
+    float metallic = materialData[matIdx * 2u + 1u].w;
 
     // Direct lighting with shadow ray
     vec3 sunDir = normalize(vec3(0.5, 0.8, 0.3));
