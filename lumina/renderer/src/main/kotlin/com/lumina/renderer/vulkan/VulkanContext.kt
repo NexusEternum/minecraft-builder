@@ -10,6 +10,7 @@ import org.lwjgl.vulkan.KHRAccelerationStructure.*
 import org.lwjgl.vulkan.KHRBufferDeviceAddress.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR
 import org.lwjgl.vulkan.KHRDeferredHostOperations.VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME
 import org.lwjgl.vulkan.KHRRayTracingPipeline.VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME
+import org.lwjgl.vulkan.KHRRayTracingPipeline.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR
 import org.lwjgl.vulkan.KHRSurface.*
 import org.lwjgl.vulkan.KHRSwapchain.*
 import org.lwjgl.vulkan.VK13.*
@@ -234,13 +235,35 @@ class VulkanContext {
             for (ext in deviceExtensions) ppExtensions.put(stack.UTF8(ext))
             ppExtensions.flip()
 
-            val features = VkPhysicalDeviceFeatures.calloc(stack)
-
             val createInfo = VkDeviceCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)
                 .pQueueCreateInfos(queueCreateInfos)
-                .pEnabledFeatures(features)
                 .ppEnabledExtensionNames(ppExtensions)
+
+            if (rtSupported) {
+                val bdaFeatures = VkPhysicalDeviceBufferDeviceAddressFeatures.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES)
+                    .bufferDeviceAddress(true)
+
+                val asFeatures = VkPhysicalDeviceAccelerationStructureFeaturesKHR.calloc(stack)
+                    .sType(KHRAccelerationStructure.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR)
+                    .accelerationStructure(true)
+                    .pNext(bdaFeatures.address())
+
+                val rtpFeatures = VkPhysicalDeviceRayTracingPipelineFeaturesKHR.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR)
+                    .rayTracingPipeline(true)
+                    .pNext(asFeatures.address())
+
+                val features2 = VkPhysicalDeviceFeatures2.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)
+                    .pNext(rtpFeatures.address())
+
+                createInfo.pNext(features2.address())
+            } else {
+                val features = VkPhysicalDeviceFeatures.calloc(stack)
+                createInfo.pEnabledFeatures(features)
+            }
 
             val pDevice = stack.mallocPointer(1)
             check(vkCreateDevice(physDev, createInfo, null, pDevice) == VK_SUCCESS)
