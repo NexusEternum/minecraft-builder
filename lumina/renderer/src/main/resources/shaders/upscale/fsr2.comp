@@ -1,0 +1,101 @@
+#version 460
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0, rgba32f) uniform image2D inputColor;
+layout(binding = 1, r32f)    uniform image2D inputDepth;
+layout(binding = 2, rg16f)   uniform image2D motionVectors;
+layout(binding = 3, rgba32f) uniform image2D historyColor;
+layout(binding = 4, rgba8)   uniform image2D outputColor;
+
+layout(push_constant) uniform Params {
+    ivec2 inputSize;
+    ivec2 outputSize;
+    float jitterX;
+    float jitterY;
+    float sharpness;
+    float deltaTime;
+    uint frameIndex;
+};
+
+// Lanczos2 kernel for spatial upsampling
+float lanczos2(float x) {
+    if (abs(x) < 1e-6) return 1.0;
+    if (abs(x) >= 2.0) return 0.0;
+    float pi_x = 3.14159265 * x;
+    return (sin(pi_x) / pi_x) * (sin(pi_x * 0.5) / (pi_x * 0.5));
+}
+
+vec3 sampleLanczos(vec2 uv) {
+    vec2 texelPos = uv * vec2(inputSize) - 0.5;
+    ivec2 baseCoord = ivec2(floor(texelPos));
+    vec2 frac = texelPos - vec2(baseCoord);
+
+    vec3 result = vec3(0.0);
+    float weightSum = 0.0;
+
+    for (int dy = -1; dy <= 2; dy++) {
+        for (int dx = -1; dx <= 2; dx++) {
+            ivec2 sampleCoord = clamp(baseCoord + ivec2(dx, dy), ivec2(0), inputSize - 1);
+            float wx = lanczos2(float(dx) - frac.x);
+            float wy = lanczos2(float(dy) - frac.y);
+            float w = wx * wy;
+            result += imageLoad(inputColor, sampleCoord).rgb * w;
+            weightSum += w;
+        }
+    }
+
+    return result / max(weightSum, 1e-6);
+}
+
+// Contrast Adaptive Sharpening (CAS)
+vec3 applySharpening(ivec2 coord, vec3 center) {
+    vec3 top    = imageLoad(outputColor, clamp(coord + ivec2(0, -1), ivec2(0), outputSize - 1)).rgb;
+    vec3 bottom = imageLoad(outputColor, clamp(coord + ivec2(0,  1), ivec2(0), outputSize - 1)).rgb;
+    vec3 left   = imageLoad(outputColor, clamp(coord + ivec2(-1, 0), ivec2(0), outputSize - 1)).rgb;
+    vec3 right  = imageLoad(outputColor, clamp(coord + ivec2( 1, 0), ivec2(0), outputSize - 1)).rgb;
+
+    vec3 blur = (top + bottom + left + right) * 0.25;
+    return center + (center - blur) * sharpness;
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= outputSize.x || coord.y >= outputSize.y) return;
+
+    vec2 outputUV = (vec2(coord) + 0.5) / vec2(outputSize);
+    vec2 inputUV = outputUV;
+
+    // Apply jitter offset for temporal stability
+    inputUV += vec2(jitterX, jitterY) / vec2(inputSize);
+
+    // Spatial upsampling via Lanczos
+    vec3 upsampled = sampleLanczos(inputUV);
+
+    // Temporal blending with history
+    vec2 motion = imageLoad(motionVectors, ivec2(inputUV * vec2(inputSize))).xy;
+    vec2 historyUV = outputUV - motion;
+    ivec2 historyCoord = ivec2(historyUV * vec2(outputSize));
+
+    if (historyCoord.x >= 0 && historyCoord.x < outputSize.x &&
+        historyCoord.y >= 0 && historyCoord.y < outputSize.y) {
+        vec3 history = imageLoad(historyColor, historyCoord).rgb;
+
+        // Neighborhood clamping
+        vec3 minC = upsampled, maxC = upsampled;
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                vec2 nUV = inputUV + vec2(dx, dy) / vec2(inputSize);
+                ivec2 nc = clamp(ivec2(nUV * vec2(inputSize)), ivec2(0), inputSize - 1);
+                vec3 ns = imageLoad(inputColor, nc).rgb;
+                minC = min(minC, ns);
+                maxC = max(maxC, ns);
+            }
+        }
+        history = clamp(history, minC, maxC);
+        upsampled = mix(history, upsampled, 0.1);
+    }
+
+    imageStore(outputColor, coord, vec4(clamp(upsampled, 0.0, 1.0), 1.0));
+    imageStore(historyColor, coord, vec4(upsampled, 1.0));
+}

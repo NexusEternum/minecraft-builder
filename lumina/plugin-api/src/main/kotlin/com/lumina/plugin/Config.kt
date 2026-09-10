@@ -59,8 +59,7 @@ class ConfigManager @Inject constructor(@Named("configDir") private val configDi
 
     private fun saveConfig(group: String, data: Map<String, Any?>) {
         try {
-            val file = File(configDir, "$group.json")
-            file.writeText(gson.toJson(data))
+            File(configDir, "$group.json").writeText(gson.toJson(data))
         } catch (e: Exception) {
             log.error("Failed to save config: {}", group, e)
         }

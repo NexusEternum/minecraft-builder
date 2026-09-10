@@ -1,0 +1,71 @@
+#version 460
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(binding = 0, rgba16f) uniform image2D sceneColor;
+layout(binding = 1, r32f) uniform image2D depthBuffer;
+layout(binding = 2, rgba16f) uniform image2D outputImage;
+
+layout(push_constant) uniform Params {
+    vec3 sunDirection;
+    float fogDensity;
+    vec3 fogColor;
+    float fogHeight;
+    vec3 sunColor;
+    float godRayIntensity;
+    int numSteps;
+    float scatteringCoeff;
+    float time;
+};
+
+// Henyey-Greenstein phase function
+float hgPhase(float cosTheta, float g) {
+    float g2 = g * g;
+    return (1.0 - g2) / (4.0 * 3.14159265 * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5));
+}
+
+// Height fog with exponential falloff
+float heightFog(vec3 pos) {
+    return fogDensity * exp(-max(pos.y - fogHeight, 0.0) * 0.01);
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(sceneColor);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec4 color = imageLoad(sceneColor, coord);
+    float depth = imageLoad(depthBuffer, coord).r;
+
+    // Volumetric fog raymarch
+    vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+    vec3 rayDir = normalize(vec3(uv * 2.0 - 1.0, 1.0)); // simplified
+
+    float stepSize = min(depth, 500.0) / float(numSteps);
+    vec3 fogAccum = vec3(0.0);
+    float transmittance = 1.0;
+
+    for (int i = 0; i < numSteps; i++) {
+        float t = (float(i) + 0.5) * stepSize;
+        vec3 samplePos = rayDir * t;
+
+        float density = heightFog(samplePos);
+        float extinction = density * scatteringCoeff;
+
+        // In-scattering from sun
+        float cosAngle = dot(rayDir, sunDirection);
+        float phase = hgPhase(cosAngle, 0.7);
+        vec3 inScatter = sunColor * phase * density * godRayIntensity;
+
+        // Ambient in-scattering
+        inScatter += fogColor * density * 0.1;
+
+        fogAccum += inScatter * transmittance * stepSize;
+        transmittance *= exp(-extinction * stepSize);
+
+        if (transmittance < 0.01) break;
+    }
+
+    vec3 result = color.rgb * transmittance + fogAccum;
+    imageStore(outputImage, coord, vec4(result, 1.0));
+}

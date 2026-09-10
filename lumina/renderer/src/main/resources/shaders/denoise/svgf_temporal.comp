@@ -1,0 +1,85 @@
+#version 460
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0, rgba32f) uniform image2D currentColor;
+layout(binding = 1, rgba32f) uniform image2D historyColor;
+layout(binding = 2, rgba32f) uniform image2D normalDepth;
+layout(binding = 3, rg16f)   uniform image2D motionVectors;
+layout(binding = 4, rgba32f) uniform image2D outputColor;
+layout(binding = 5, rg32f)   uniform image2D moments; // mean luminance, variance
+
+layout(push_constant) uniform Params {
+    float alpha;
+    float momentAlpha;
+    uint frameCount;
+};
+
+vec3 rgbToYCoCg(vec3 rgb) {
+    return vec3(
+        0.25 * rgb.r + 0.5 * rgb.g + 0.25 * rgb.b,
+        0.5 * rgb.r - 0.5 * rgb.b,
+        -0.25 * rgb.r + 0.5 * rgb.g - 0.25 * rgb.b
+    );
+}
+
+vec3 yCoCgToRgb(vec3 ycocg) {
+    return vec3(
+        ycocg.x + ycocg.y - ycocg.z,
+        ycocg.x + ycocg.z,
+        ycocg.x - ycocg.y - ycocg.z
+    );
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(currentColor);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec4 current = imageLoad(currentColor, coord);
+    vec2 motion = imageLoad(motionVectors, coord).xy;
+    vec2 historyUV = (vec2(coord) + 0.5) / vec2(size) - motion;
+    ivec2 historyCoord = ivec2(historyUV * vec2(size));
+
+    bool validHistory = historyCoord.x >= 0 && historyCoord.x < size.x &&
+                        historyCoord.y >= 0 && historyCoord.y < size.y &&
+                        frameCount > 0;
+
+    vec4 result;
+    vec2 newMoments;
+
+    if (validHistory) {
+        vec4 history = imageLoad(historyColor, historyCoord);
+
+        // YCoCg AABB clamping for ghosting rejection
+        vec3 minColor = vec3(1e10);
+        vec3 maxColor = vec3(-1e10);
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                ivec2 nc = clamp(coord + ivec2(dx, dy), ivec2(0), size - 1);
+                vec3 ycocg = rgbToYCoCg(imageLoad(currentColor, nc).rgb);
+                minColor = min(minColor, ycocg);
+                maxColor = max(maxColor, ycocg);
+            }
+        }
+
+        vec3 historyYCoCg = rgbToYCoCg(history.rgb);
+        vec3 clampedHistory = yCoCgToRgb(clamp(historyYCoCg, minColor, maxColor));
+
+        float blendAlpha = alpha;
+        result = vec4(mix(clampedHistory, current.rgb, blendAlpha), 1.0);
+
+        // Moments for variance estimation
+        float lum = dot(result.rgb, vec3(0.2126, 0.7152, 0.0722));
+        vec2 prevMoments = imageLoad(moments, historyCoord).xy;
+        newMoments.x = mix(prevMoments.x, lum, momentAlpha);
+        newMoments.y = mix(prevMoments.y, lum * lum, momentAlpha);
+    } else {
+        result = current;
+        float lum = dot(result.rgb, vec3(0.2126, 0.7152, 0.0722));
+        newMoments = vec2(lum, lum * lum);
+    }
+
+    imageStore(outputColor, coord, result);
+    imageStore(moments, coord, vec4(newMoments, 0.0, 0.0));
+}
