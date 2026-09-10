@@ -7,6 +7,7 @@ application {
     mainClass.set("com.lumina.launcher.LuminaLauncherKt")
     applicationDefaultJvmArgs = listOf(
         "-Xmx4g",
+        "-Xss4m",
         "-XX:+UseZGC",
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
         "-Dorg.lwjgl.util.DebugLoader=true"
@@ -75,6 +76,7 @@ tasks.register<JavaExec>("runDemo") {
     args = listOf("--demo", "--developer-mode")
     jvmArgs = listOf(
         "-Xmx4g",
+        "-Xss4m",
         "-XX:+UseZGC",
         "--add-opens", "java.base/java.lang=ALL-UNNAMED"
     )
