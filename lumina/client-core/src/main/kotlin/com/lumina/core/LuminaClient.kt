@@ -9,6 +9,8 @@ import com.lumina.core.game.JagexLauncherIPC
 import com.lumina.plugin.*
 import com.lumina.renderer.LuminaRenderer
 import com.lumina.renderer.camera.CameraController
+import com.lumina.renderer.overlay.OverlayRenderer
+import com.lumina.renderer.scene.DemoScene
 import com.lumina.renderer.scene.SceneBufferManager
 import com.lumina.scene.graph.SceneGraph
 import org.lwjgl.glfw.GLFW.*
@@ -27,6 +29,8 @@ class LuminaClient(private val args: Array<String>) {
     private lateinit var authManager: JagexAuthManager
     private lateinit var camera: CameraController
     private lateinit var sceneBufferManager: SceneBufferManager
+    private lateinit var overlay: OverlayRenderer
+    private lateinit var demoScene: DemoScene
     @Volatile private var running = false
     private var resizeRequested = false
     private var newWidth = 0
@@ -46,7 +50,8 @@ class LuminaClient(private val args: Array<String>) {
         renderer = injector.getInstance(LuminaRenderer::class.java)
         camera = injector.getInstance(CameraController::class.java)
         sceneBufferManager = injector.getInstance(SceneBufferManager::class.java)
-        val sceneGraph = injector.getInstance(SceneGraph::class.java)
+        overlay = injector.getInstance(OverlayRenderer::class.java)
+        demoScene = injector.getInstance(DemoScene::class.java)
 
         val ipc = injector.getInstance(JagexLauncherIPC::class.java)
         ipc.initialize(args)
@@ -56,13 +61,22 @@ class LuminaClient(private val args: Array<String>) {
             gameJarLoader.loadGameJars(runeliteDir)
             log.info("Game client version: {}", gameJarLoader.getClientVersion())
         } catch (e: Exception) {
-            log.error("Failed to load game JARs: {}", e.message)
+            log.warn("Game JARs not found (running in demo mode): {}", e.message)
         }
 
         renderer.init("Lumina - Old School RuneScape", 1920, 1080)
         setupCallbacks()
 
-        val developerMode = "--developer-mode" in args
+        // Generate and upload demo scene so the path tracer has geometry
+        demoScene.generate()
+        sceneBufferManager.uploadSceneData()
+        log.info("Demo scene loaded and uploaded to GPU")
+
+        // Position camera to view the scene
+        camera.setPosition(0f, 8f, 20f)
+        camera.setRotation(-0.3f, 3.14f)
+
+        val developerMode = "--developer-mode" in args || "--demo" in args
         pluginManager = PluginManager(injector, developerMode)
 
         val pluginDir = File(luminaDir, "plugins")
@@ -78,8 +92,27 @@ class LuminaClient(private val args: Array<String>) {
         pluginManager.startAll()
         eventBus.post(GameStateChanged(GameState.STARTING, GameState.LOGIN_SCREEN))
 
+        printControls()
+
         running = true
         mainLoop()
+    }
+
+    private fun printControls() {
+        log.info("=== Controls ===")
+        log.info("WASD       - Move camera")
+        log.info("Mouse      - Look around (click to capture, ESC to release)")
+        log.info("Space/Shift- Up/Down")
+        log.info("F1         - Toggle FPS display")
+        log.info("F2         - Toggle debug info")
+        log.info("F3         - Print settings")
+        log.info("F5         - Toggle bloom")
+        log.info("F6         - Toggle volumetric fog")
+        log.info("F7         - Cycle tone mapping (AgX/ACES/Reinhard/None)")
+        log.info("F8         - Cycle upscale quality")
+        log.info("+/-        - Adjust exposure")
+        log.info("ESC        - Toggle mouse capture")
+        log.info("================")
     }
 
     private fun setupCallbacks() {
@@ -96,12 +129,11 @@ class LuminaClient(private val args: Array<String>) {
             camera.handleMouseMove(x, y)
         })
 
-        glfwSetKeyCallback(window, GLFWKeyCallbackI { _, key, _, action, _ ->
-            if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
-                camera.toggleMouseCapture(window)
-            }
-            if (key == GLFW_KEY_F11 && action == GLFW_PRESS) {
-                // could toggle fullscreen in the future
+        glfwSetKeyCallback(window, GLFWKeyCallbackI { win, key, _, action, _ ->
+            if (!overlay.handleKey(key, action)) {
+                if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+                    camera.toggleMouseCapture(win)
+                }
             }
         })
     }
@@ -125,6 +157,8 @@ class LuminaClient(private val args: Array<String>) {
             eventBus.post(BeforeRender())
             renderer.renderFrame()
             eventBus.post(AfterRender())
+
+            overlay.update(renderer.lastFrameTimeMs, renderer.frameCount)
 
             if (renderer.frameCount % 300 == 0L) {
                 eventBus.post(FrameRendered(renderer.lastFrameTimeMs, renderer.fps))

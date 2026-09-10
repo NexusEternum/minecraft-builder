@@ -13,6 +13,8 @@ import com.lumina.renderer.rt.AccelerationStructureManager
 import com.lumina.renderer.rt.RayTracingPipeline
 import com.lumina.renderer.upscale.UpscaleManager
 import com.lumina.renderer.camera.CameraController
+import com.lumina.renderer.overlay.OverlayRenderer
+import com.lumina.renderer.scene.DemoScene
 import com.lumina.renderer.scene.SceneBufferManager
 import com.lumina.renderer.vulkan.FrameManager
 import com.lumina.renderer.vulkan.RenderTargets
@@ -52,6 +54,8 @@ class LuminaModule(
         bind(ShaderCompiler::class.java).asEagerSingleton()
         bind(LuminaRenderer::class.java).asEagerSingleton()
         bind(CameraController::class.java).asEagerSingleton()
+        bind(OverlayRenderer::class.java).asEagerSingleton()
+        bind(DemoScene::class.java).asEagerSingleton()
         bind(SceneBufferManager::class.java).asEagerSingleton()
         bind(OsrsSceneExtractor::class.java).asEagerSingleton()
         bind(ModelPackManager::class.java).asEagerSingleton()
