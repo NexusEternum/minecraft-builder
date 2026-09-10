@@ -265,24 +265,20 @@ class RayTracingPipeline @Inject constructor(
             vkMapMemory(dev, buf.memory, 0, sbtSize, 0, pData)
             val mapped = pData.getByteBuffer(0, sbtSize.toInt())
 
-            // Raygen handle at offset 0
-            handleData.position(0).limit(handleSize)
+            // Raygen handle (group 0) at SBT offset 0
             mapped.position(0)
-            mapped.put(handleData.slice().limit(handleSize) as ByteBuffer)
+            for (i in 0 until handleSize) mapped.put(handleData.get(i))
 
-            // Miss handles
-            handleData.position(handleSize * 2).limit(handleSize * 3)
+            // Miss handles (groups 2,3) at SBT offset raygenSize
             mapped.position(raygenSize.toInt())
-            mapped.put(handleData.slice().limit(handleSize) as ByteBuffer)
+            for (i in 0 until handleSize) mapped.put(handleData.get(handleSize * 2 + i))
 
-            handleData.position(handleSize * 3).limit(handleSize * 4)
             mapped.position((raygenSize + alignedHandleSize).toInt())
-            mapped.put(handleData.slice().limit(handleSize) as ByteBuffer)
+            for (i in 0 until handleSize) mapped.put(handleData.get(handleSize * 3 + i))
 
-            // Hit handle
-            handleData.position(handleSize).limit(handleSize * 2)
+            // Hit handle (group 1) at SBT offset raygenSize + missSize
             mapped.position((raygenSize + missSize).toInt())
-            mapped.put(handleData.slice().limit(handleSize) as ByteBuffer)
+            for (i in 0 until handleSize) mapped.put(handleData.get(handleSize + i))
 
             vkUnmapMemory(dev, buf.memory)
             MemoryUtil.memFree(handleData)

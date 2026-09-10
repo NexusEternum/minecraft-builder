@@ -2,6 +2,7 @@ package com.lumina.renderer.vulkan
 
 import org.lwjgl.system.MemoryStack
 import org.lwjgl.vulkan.*
+import org.lwjgl.vulkan.KHRBufferDeviceAddress.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR
 import org.lwjgl.vulkan.VK13.*
 import org.slf4j.LoggerFactory
 import java.nio.ByteBuffer
@@ -46,6 +47,13 @@ object VulkanMemory {
                 .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
                 .allocationSize(memReqs.size())
                 .memoryTypeIndex(findMemoryType(ctx, memReqs.memoryTypeBits(), memoryProperties))
+
+            if (usage and VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR != 0) {
+                val flagsInfo = VkMemoryAllocateFlagsInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO)
+                    .flags(VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT)
+                allocInfo.pNext(flagsInfo)
+            }
 
             val pMemory = stack.mallocLong(1)
             check(vkAllocateMemory(dev, allocInfo, null, pMemory) == VK_SUCCESS)
