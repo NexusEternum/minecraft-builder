@@ -159,12 +159,10 @@ void main() {
         bounceDir = cosineWeightedHemisphere(normal, payload.seed);
     }
 
-    // Russian roulette for bounce rays
+    // Russian roulette — probability of continuing a bounce path
     float rrProb = max(max(albedo.r, albedo.g), albedo.b);
     if (randomFloat(payload.seed) < rrProb) {
-        RayPayload bouncePayload;
-        bouncePayload.seed = payload.seed;
-        // Would recursively trace here in a full implementation
+        // Future: recursive trace with bounceDir for global illumination
     }
 
     vec3 ambient = albedo * vec3(0.03, 0.04, 0.06);
