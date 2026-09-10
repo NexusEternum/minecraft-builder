@@ -8,6 +8,7 @@ import com.lumina.renderer.upscale.UpscaleManager
 import com.lumina.renderer.upscale.UpscaleMode
 import com.lumina.renderer.vulkan.FrameManager
 import com.lumina.renderer.vulkan.RenderTargets
+import com.lumina.renderer.vulkan.ShaderCompiler
 import com.lumina.renderer.vulkan.VulkanContext
 import com.lumina.scene.graph.SceneGraph
 import org.lwjgl.system.MemoryStack
@@ -29,7 +30,8 @@ class LuminaRenderer @Inject constructor(
     val postProcess: PostProcessStack,
     val upscale: UpscaleManager,
     val frameManager: FrameManager,
-    val renderTargets: RenderTargets
+    val renderTargets: RenderTargets,
+    val shaderCompiler: ShaderCompiler
 ) {
     private val log = LoggerFactory.getLogger(LuminaRenderer::class.java)
 
@@ -40,6 +42,7 @@ class LuminaRenderer @Inject constructor(
 
     fun init(title: String = "Lumina - OSRS", width: Int = 1280, height: Int = 720) {
         vkContext.init(title, width, height)
+        shaderCompiler.init()
         frameManager.init()
         upscale.init()
 
@@ -260,6 +263,7 @@ class LuminaRenderer @Inject constructor(
         denoiser.destroy()
         rtPipeline.destroy()
         accelStructure.destroy()
+        shaderCompiler.destroy()
         renderTargets.destroy()
         frameManager.destroy()
         vkContext.destroy()

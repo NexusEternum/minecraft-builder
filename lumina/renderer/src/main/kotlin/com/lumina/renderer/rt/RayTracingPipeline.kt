@@ -43,7 +43,6 @@ class RayTracingPipeline @Inject constructor(
             log.warn("RT pipeline not available -- hardware ray tracing not supported")
             return
         }
-        shaderCompiler.init()
         createDescriptorSetLayout()
         createDescriptorPool()
         createPipeline()
