@@ -36,6 +36,7 @@ class RenderTargets @Inject constructor(
     var renderHeight: Int = 0; private set
     var displayWidth: Int = 0; private set
     var displayHeight: Int = 0; private set
+    private var initialTransitionDone = false
 
     fun init(renderW: Int, renderH: Int, displayW: Int, displayH: Int) {
         renderWidth = renderW
@@ -68,6 +69,8 @@ class RenderTargets @Inject constructor(
     }
 
     fun transitionAllToGeneral(cmdBuf: VkCommandBuffer) {
+        if (initialTransitionDone) return
+        initialTransitionDone = true
         val allImages = listOfNotNull(
             rtOutputColor, rtNormalDepth, rtMotionVectors,
             denoiseOutput, denoiseHistory, denoiseMoments,
@@ -97,6 +100,7 @@ class RenderTargets @Inject constructor(
         denoiseOutput = null; denoiseHistory = null; denoiseMoments = null
         bloomScratchA = null; bloomScratchB = null; postfxOutput = null
         upscaleOutput = null; upscaleHistory = null; tonemapOutput = null
+        initialTransitionDone = false
         log.debug("Render targets destroyed")
     }
 

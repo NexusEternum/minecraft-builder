@@ -147,21 +147,28 @@ class LuminaClient(private val args: Array<String>) {
 
             if (resizeRequested) {
                 resizeRequested = false
-                renderer.resize(newWidth, newHeight)
             }
 
-            val deltaTime = (renderer.lastFrameTimeMs / 1000.0).toFloat().coerceIn(0.0001f, 0.1f)
-            camera.update(window, deltaTime,
-                renderer.upscale.getJitterX(), renderer.upscale.getJitterY())
+            try {
+                val deltaTime = (renderer.lastFrameTimeMs / 1000.0).toFloat().coerceIn(0.0001f, 0.1f)
+                camera.update(window, deltaTime,
+                    renderer.upscale.getJitterX(), renderer.upscale.getJitterY())
 
-            eventBus.post(BeforeRender())
-            renderer.renderFrame()
-            eventBus.post(AfterRender())
+                eventBus.post(BeforeRender())
+                renderer.renderFrame()
+                eventBus.post(AfterRender())
 
-            overlay.update(renderer.lastFrameTimeMs, renderer.frameCount)
+                overlay.update(renderer.lastFrameTimeMs, renderer.frameCount)
 
-            if (renderer.frameCount % 300 == 0L) {
-                eventBus.post(FrameRendered(renderer.lastFrameTimeMs, renderer.fps))
+                if (renderer.frameCount % 300 == 0L) {
+                    eventBus.post(FrameRendered(renderer.lastFrameTimeMs, renderer.fps))
+                }
+            } catch (e: Exception) {
+                log.error("Render error: {}", e.message)
+                if (renderer.frameCount < 5) {
+                    log.error("Fatal render error on early frame", e)
+                    break
+                }
             }
         }
 
