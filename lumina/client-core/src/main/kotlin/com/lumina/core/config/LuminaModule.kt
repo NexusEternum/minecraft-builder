@@ -60,6 +60,8 @@ class LuminaModule(
         bind(OsrsSceneExtractor::class.java).asEagerSingleton()
         bind(ModelPackManager::class.java).asEagerSingleton()
         bind(ConfigManager::class.java).asEagerSingleton()
+        bind(com.lumina.core.game.JagexAuthManager::class.java).asEagerSingleton()
+        bind(com.lumina.core.game.GameJarLoader::class.java).asEagerSingleton()
         bind(JagexLauncherIPC::class.java).asEagerSingleton()
     }
 
