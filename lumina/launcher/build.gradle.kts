@@ -14,7 +14,7 @@ application {
 }
 
 val lwjglVersion: String by project
-val lwjglNatives: String by project
+val lwjglNatives: String = rootProject.extra["detectedLwjglNatives"] as String
 
 dependencies {
     implementation(project(":client-core"))

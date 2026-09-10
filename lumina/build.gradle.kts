@@ -15,12 +15,22 @@ allprojects {
     }
 }
 
+val detectedLwjglNatives: String by extra {
+    when {
+        org.gradle.internal.os.OperatingSystem.current().isWindows -> "natives-windows"
+        org.gradle.internal.os.OperatingSystem.current().isMacOsX -> {
+            if (System.getProperty("os.arch") == "aarch64") "natives-macos-arm64" else "natives-macos"
+        }
+        else -> "natives-linux"
+    }
+}
+
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
 
     val kotlinVersion: String by project
     val lwjglVersion: String by project
-    val lwjglNatives: String by project
+    val lwjglNatives = detectedLwjglNatives
     val junitVersion: String by project
 
     dependencies {

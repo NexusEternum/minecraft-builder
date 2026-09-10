@@ -3,7 +3,7 @@ plugins {
 }
 
 val lwjglVersion: String by project
-val lwjglNatives: String by project
+val lwjglNatives: String = rootProject.extra["detectedLwjglNatives"] as String
 
 dependencies {
     api(project(":plugin-api"))
