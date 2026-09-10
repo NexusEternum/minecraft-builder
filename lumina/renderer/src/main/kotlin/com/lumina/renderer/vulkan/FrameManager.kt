@@ -119,7 +119,7 @@ class FrameManager @Inject constructor(
                 .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
                 .waitSemaphoreCount(1)
                 .pWaitSemaphores(stack.longs(imageAvailableSemaphores[currentFrame]))
-                .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT))
+                .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT))
                 .pCommandBuffers(stack.pointers(cmdBuf))
                 .pSignalSemaphores(stack.longs(renderFinishedSemaphores[currentFrame]))
 

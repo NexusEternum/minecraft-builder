@@ -15,8 +15,10 @@ import com.lumina.scene.graph.SceneGraph
 import org.lwjgl.system.MemoryStack
 import org.lwjgl.vulkan.KHRSwapchain.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
 import org.lwjgl.vulkan.VK13.*
+import org.lwjgl.vulkan.VkClearColorValue
 import org.lwjgl.vulkan.VkImageBlit
 import org.lwjgl.vulkan.VkImageMemoryBarrier
+import org.lwjgl.vulkan.VkImageSubresourceRange
 import org.slf4j.LoggerFactory
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -82,35 +84,79 @@ class LuminaRenderer @Inject constructor(
         val now = System.nanoTime()
         lastFrameTimeMs = (now - lastFrameNanos) / 1_000_000.0
         lastFrameNanos = now
-        val deltaTime = (lastFrameTimeMs / 1000.0).toFloat()
 
-        if (sceneGraph.dirty) {
-            accelStructure.rebuildTLAS()
-            sceneGraph.clearDirty()
-            descriptorsDirty = true
+        if (frameCount == 0L) {
+            log.info("=== DIAGNOSTIC MODE: clearing swapchain to cycling color ===")
+        }
+        if (frameCount % 60 == 0L) {
+            log.info("Frame {} (swapchain images: {}, format: {})",
+                frameCount, vkContext.swapchainImages.size, vkContext.swapchainFormat)
         }
 
-        updateAllDescriptors()
-
-        upscale.updateJitter()
-
-        val frameCtx = frameManager.beginFrame() ?: return
+        val frameCtx = frameManager.beginFrame()
+        if (frameCtx == null) {
+            log.warn("beginFrame returned null (swapchain out of date?)")
+            return
+        }
         val cmdBuf = frameCtx.commandBuffer
+        val swapchainImage = vkContext.swapchainImages.getOrNull(frameCtx.imageIndex)
+        if (swapchainImage == null) {
+            log.error("No swapchain image at index {}", frameCtx.imageIndex)
+            return
+        }
 
-        renderTargets.transitionAllToGeneral(cmdBuf)
+        MemoryStack.stackPush().use { stack ->
+            val barrier = VkImageMemoryBarrier.calloc(1, stack)
+            barrier.get(0)
+                .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
+                .oldLayout(VK_IMAGE_LAYOUT_UNDEFINED)
+                .newLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+                .srcAccessMask(0)
+                .dstAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .image(swapchainImage)
+            barrier.get(0).subresourceRange()
+                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1)
 
-        // 1. Path trace via hardware RT -> writes rtOutputColor
-        rtPipeline.recordCommands(cmdBuf, upscale.renderWidth, upscale.renderHeight)
+            vkCmdPipelineBarrier(cmdBuf,
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0, null, null, barrier)
 
-        // Barrier: RT writes -> compute reads
-        insertRTToComputeBarrier(cmdBuf)
+            val t = (frameCount % 300).toFloat() / 300f
+            val clearColor = VkClearColorValue.calloc(stack)
+            clearColor.float32(0, 0.1f + t * 0.3f)
+            clearColor.float32(1, 0.2f + t * 0.1f)
+            clearColor.float32(2, 0.4f + (1f - t) * 0.4f)
+            clearColor.float32(3, 1.0f)
 
-        // 2. Tonemap directly from RT output for now (skip denoise/upscale/postfx
-        //    until the full pipeline data flow is validated)
-        postProcess.recordTonemapOnly(cmdBuf, vkContext.width, vkContext.height)
+            val range = VkImageSubresourceRange.calloc(1, stack)
+            range.get(0)
+                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1)
 
-        // 3. Copy tonemapped result to swapchain image
-        copyToSwapchain(cmdBuf, frameCtx.imageIndex)
+            vkCmdClearColorImage(cmdBuf, swapchainImage,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, clearColor, range)
+
+            val presentBarrier = VkImageMemoryBarrier.calloc(1, stack)
+            presentBarrier.get(0)
+                .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
+                .oldLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+                .newLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+                .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                .dstAccessMask(0)
+                .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .image(swapchainImage)
+            presentBarrier.get(0).subresourceRange()
+                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1)
+
+            vkCmdPipelineBarrier(cmdBuf,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                0, null, null, presentBarrier)
+        }
 
         frameManager.endFrame(frameCtx)
         frameCount++
