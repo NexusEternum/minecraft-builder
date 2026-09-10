@@ -123,7 +123,10 @@ class FrameManager @Inject constructor(
                 .pCommandBuffers(stack.pointers(cmdBuf))
                 .pSignalSemaphores(stack.longs(renderFinishedSemaphores[currentFrame]))
 
-            check(vkQueueSubmit(ctx.graphicsQueue!!, submitInfo, inFlightFences[currentFrame]) == VK_SUCCESS)
+            val submitResult = vkQueueSubmit(ctx.graphicsQueue!!, submitInfo, inFlightFences[currentFrame])
+            if (submitResult != VK_SUCCESS) {
+                log.error("vkQueueSubmit failed: {}", submitResult)
+            }
 
             val presentInfo = VkPresentInfoKHR.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_PRESENT_INFO_KHR)
@@ -132,7 +135,10 @@ class FrameManager @Inject constructor(
                 .pSwapchains(stack.longs(ctx.swapchain))
                 .pImageIndices(stack.ints(frameCtx.imageIndex))
 
-            vkQueuePresentKHR(ctx.presentQueue!!, presentInfo)
+            val presentResult = vkQueuePresentKHR(ctx.presentQueue!!, presentInfo)
+            if (presentResult != VK_SUCCESS && presentResult != VK_SUBOPTIMAL_KHR) {
+                log.error("vkQueuePresentKHR failed: {}", presentResult)
+            }
         }
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT
