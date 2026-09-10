@@ -1,66 +1,151 @@
 package com.lumina.renderer.denoise
 
-import com.lumina.renderer.vulkan.VulkanContext
-import com.lumina.renderer.vulkan.VulkanImage
+import com.lumina.renderer.vulkan.*
+import org.lwjgl.system.MemoryStack
+import org.lwjgl.vulkan.VK13.*
+import org.lwjgl.vulkan.VkCommandBuffer
 import org.slf4j.LoggerFactory
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class SVGFDenoiser @Inject constructor(
-    private val ctx: VulkanContext
+    private val ctx: VulkanContext,
+    private val shaderCompiler: ShaderCompiler,
+    private val renderTargets: RenderTargets
 ) {
     private val log = LoggerFactory.getLogger(SVGFDenoiser::class.java)
 
-    private var temporalPipeline: Long = 0
-    private var variancePipeline: Long = 0
-    private var atrousPipeline: Long = 0
-    private var historyImage: VulkanImage? = null
-    private var momentsImage: VulkanImage? = null
+    private var temporalPipeline: ComputePipelineBundle? = null
+    private var atrousPipeline: ComputePipelineBundle? = null
 
     var atrousIterations: Int = 5
     var temporalAlpha: Float = 0.2f
+    var momentAlpha: Float = 0.3f
     var sigmaLuminance: Float = 4.0f
     var sigmaNormal: Float = 128.0f
     var sigmaDepth: Float = 1.0f
 
-    fun init(width: Int, height: Int) {
-        log.info("Initializing SVGF denoiser ({}x{}, {} A-Trous passes)", width, height, atrousIterations)
-        createComputePipelines()
-        createImages(width, height)
+    private var width: Int = 0
+    private var height: Int = 0
+    private var frameCount: Long = 0
+
+    fun init(w: Int, h: Int) {
+        width = w; height = h
+        createTemporalPipeline()
+        createAtrousPipeline()
+        log.info("SVGF denoiser initialized ({}x{}, {} A-Trous passes)", w, h, atrousIterations)
     }
 
-    private fun createComputePipelines() {
-        // Three compute pipelines:
-        // 1. Temporal accumulation with motion vector reprojection + YCoCg AABB clamping
-        // 2. Variance estimation from temporal moments
-        // 3. A-Trous wavelet filter with edge-stopping (normal, depth, luminance)
-        log.debug("Created SVGF compute pipelines")
+    private fun createTemporalPipeline() {
+        val bindings = listOf(
+            ComputePipelineFactory.BindingDesc(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // currentColor
+            ComputePipelineFactory.BindingDesc(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // historyColor
+            ComputePipelineFactory.BindingDesc(2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // normalDepth
+            ComputePipelineFactory.BindingDesc(3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // motionVectors
+            ComputePipelineFactory.BindingDesc(4, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // outputColor
+            ComputePipelineFactory.BindingDesc(5, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // moments
+        )
+        temporalPipeline = ComputePipelineFactory.create(
+            ctx, shaderCompiler, "/shaders/denoise/svgf_temporal.comp", bindings,
+            pushConstantSize = 12 // alpha(4) + momentAlpha(4) + frameCount(4)
+        )
     }
 
-    private fun createImages(width: Int, height: Int) {
-        // History color, moments (mean, variance), filtered output
-        log.debug("Created SVGF images ({}x{})", width, height)
+    private fun createAtrousPipeline() {
+        val bindings = listOf(
+            ComputePipelineFactory.BindingDesc(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // input
+            ComputePipelineFactory.BindingDesc(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // normalDepth
+            ComputePipelineFactory.BindingDesc(2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // output
+            ComputePipelineFactory.BindingDesc(3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // moments (variance)
+        )
+        atrousPipeline = ComputePipelineFactory.create(
+            ctx, shaderCompiler, "/shaders/denoise/svgf_atrous.comp", bindings,
+            pushConstantSize = 20 // stepSize(4) + sigmaLum(4) + sigmaNorm(4) + sigmaDepth(4) + iteration(4)
+        )
     }
 
-    fun denoise(inputImage: Long, normalDepth: Long, motionVectors: Long, outputImage: Long) {
+    fun updateDescriptors() {
+        val temporal = temporalPipeline ?: return
+        val rt = renderTargets
+
+        ComputePipelineFactory.updateImageBinding(ctx, temporal.descriptorSet, 0, rt.rtOutputColor!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, temporal.descriptorSet, 1, rt.denoiseHistory!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, temporal.descriptorSet, 2, rt.rtNormalDepth!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, temporal.descriptorSet, 3, rt.rtMotionVectors!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, temporal.descriptorSet, 4, rt.denoiseOutput!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, temporal.descriptorSet, 5, rt.denoiseMoments!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+
+        val atrous = atrousPipeline ?: return
+        ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 0, rt.denoiseOutput!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 1, rt.rtNormalDepth!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 2, rt.bloomScratchA!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 3, rt.denoiseMoments!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+    }
+
+    fun recordCommands(cmdBuf: VkCommandBuffer) {
+        val temporal = temporalPipeline ?: return
+        val atrous = atrousPipeline ?: return
+
+        val groupsX = (width + 15) / 16
+        val groupsY = (height + 15) / 16
+
         // Pass 1: Temporal accumulation
-        // Pass 2: Variance estimation
-        // Pass 3-7: A-Trous wavelet filter (5 iterations, step sizes 1,2,4,8,16)
+        vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, temporal.pipeline)
+        MemoryStack.stackPush().use { stack ->
+            vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
+                temporal.pipelineLayout, 0, stack.longs(temporal.descriptorSet), null)
+
+            val pushData = stack.calloc(12)
+            pushData.putFloat(temporalAlpha)
+            pushData.putFloat(momentAlpha)
+            pushData.putInt(frameCount.toInt())
+            pushData.flip()
+            vkCmdPushConstants(cmdBuf, temporal.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushData)
+        }
+        vkCmdDispatch(cmdBuf, groupsX, groupsY, 1)
+
+        RenderTargets.insertComputeBarrier(cmdBuf)
+
+        // Passes 2..N: A-Trous wavelet filter
+        vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, atrous.pipeline)
+        MemoryStack.stackPush().use { stack ->
+            vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
+                atrous.pipelineLayout, 0, stack.longs(atrous.descriptorSet), null)
+        }
+
+        for (i in 0 until atrousIterations) {
+            val stepSize = 1 shl i
+            MemoryStack.stackPush().use { stack ->
+                val pushData = stack.calloc(20)
+                pushData.putInt(stepSize)
+                pushData.putFloat(sigmaLuminance)
+                pushData.putFloat(sigmaNormal)
+                pushData.putFloat(sigmaDepth)
+                pushData.putInt(i)
+                pushData.flip()
+                vkCmdPushConstants(cmdBuf, atrous.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushData)
+            }
+            vkCmdDispatch(cmdBuf, groupsX, groupsY, 1)
+
+            if (i < atrousIterations - 1) {
+                RenderTargets.insertComputeBarrier(cmdBuf)
+            }
+        }
+
+        frameCount++
     }
 
-    fun resize(width: Int, height: Int) {
-        destroyImages()
-        createImages(width, height)
-    }
-
-    private fun destroyImages() {
-        historyImage = null
-        momentsImage = null
+    fun resize(w: Int, h: Int) {
+        width = w; height = h
+        frameCount = 0
     }
 
     fun destroy() {
-        destroyImages()
+        temporalPipeline?.let { ComputePipelineFactory.destroy(ctx, it) }
+        atrousPipeline?.let { ComputePipelineFactory.destroy(ctx, it) }
+        temporalPipeline = null
+        atrousPipeline = null
         log.info("SVGF denoiser destroyed")
     }
 }

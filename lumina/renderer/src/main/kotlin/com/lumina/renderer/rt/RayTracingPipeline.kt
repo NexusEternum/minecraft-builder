@@ -1,13 +1,10 @@
 package com.lumina.renderer.rt
 
-import com.lumina.renderer.vulkan.CompiledShader
-import com.lumina.renderer.vulkan.ShaderCompiler
-import com.lumina.renderer.vulkan.ShaderStage
-import com.lumina.renderer.vulkan.VulkanContext
-import com.lumina.renderer.vulkan.VulkanMemory
+import com.lumina.renderer.vulkan.*
 import org.lwjgl.system.MemoryStack
 import org.lwjgl.system.MemoryUtil
 import org.lwjgl.vulkan.*
+import org.lwjgl.vulkan.KHRAccelerationStructure
 import org.lwjgl.vulkan.KHRAccelerationStructure.VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
 import org.lwjgl.vulkan.KHRBufferDeviceAddress.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR
 import org.lwjgl.vulkan.KHRRayTracingPipeline.*
@@ -325,13 +322,119 @@ class RayTracingPipeline @Inject constructor(
         )
     }
 
+    fun updateDescriptors(renderTargets: RenderTargets, cameraUbo: VulkanBuffer? = null,
+                          vertexBuffer: VulkanBuffer? = null, indexBuffer: VulkanBuffer? = null,
+                          materialBuffer: VulkanBuffer? = null) {
+        if (!ctx.rtSupported || descriptorSet == 0L) return
+        val dev = ctx.device!!
+        val rt = renderTargets
+
+        MemoryStack.stackPush().use { stack ->
+            val writes = mutableListOf<() -> Unit>()
+
+            // Binding 0: TLAS
+            if (accelStructure.getTLASHandle() != 0L) {
+                val asWrite = VkWriteDescriptorSetAccelerationStructureKHR.calloc(stack)
+                    .sType(KHRAccelerationStructure.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR)
+                    .pAccelerationStructures(stack.longs(accelStructure.getTLASHandle()))
+
+                val write = VkWriteDescriptorSet.calloc(1, stack)
+                write.get(0)
+                    .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                    .dstSet(descriptorSet)
+                    .dstBinding(0)
+                    .descriptorCount(1)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
+                    .pNext(asWrite)
+
+                vkUpdateDescriptorSets(dev, write, null)
+            }
+
+            // Bindings 1-3: Storage images
+            val imageBindings = listOf(
+                1 to rt.rtOutputColor,
+                2 to rt.rtNormalDepth,
+                3 to rt.rtMotionVectors
+            )
+            for ((binding, image) in imageBindings) {
+                if (image != null) {
+                    ComputePipelineFactory.updateImageBinding(ctx, descriptorSet, binding, image.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+                }
+            }
+
+            // Binding 4: Camera UBO
+            if (cameraUbo != null) {
+                val bufInfo = VkDescriptorBufferInfo.calloc(1, stack)
+                bufInfo.get(0).buffer(cameraUbo.buffer).offset(0).range(cameraUbo.size)
+
+                val write = VkWriteDescriptorSet.calloc(1, stack)
+                write.get(0)
+                    .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                    .dstSet(descriptorSet)
+                    .dstBinding(4)
+                    .descriptorCount(1)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                    .pBufferInfo(bufInfo)
+
+                vkUpdateDescriptorSets(dev, write, null)
+            }
+
+            // Bindings 5-7: SSBOs
+            val bufferBindings = listOf(
+                5 to vertexBuffer,
+                6 to indexBuffer,
+                7 to materialBuffer
+            )
+            for ((binding, buffer) in bufferBindings) {
+                if (buffer != null) {
+                    val bufInfo = VkDescriptorBufferInfo.calloc(1, stack)
+                    bufInfo.get(0).buffer(buffer.buffer).offset(0).range(buffer.size)
+
+                    val write = VkWriteDescriptorSet.calloc(1, stack)
+                    write.get(0)
+                        .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                        .dstSet(descriptorSet)
+                        .dstBinding(binding)
+                        .descriptorCount(1)
+                        .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                        .pBufferInfo(bufInfo)
+
+                    vkUpdateDescriptorSets(dev, write, null)
+                }
+            }
+        }
+    }
+
+    private var cameraBuffer: VulkanBuffer? = null
+
     fun updateCamera(
         posX: Float, posY: Float, posZ: Float,
         pitch: Float, yaw: Float, fov: Float,
-        nearPlane: Float, farPlane: Float
+        nearPlane: Float, farPlane: Float,
+        jitterX: Float = 0f, jitterY: Float = 0f
     ) {
-        // Upload camera UBO -- requires updating descriptor set binding 4
+        if (cameraBuffer == null) {
+            cameraBuffer = VulkanMemory.createBuffer(ctx, 64,
+                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+        }
+
+        val dev = ctx.device!!
+        MemoryStack.stackPush().use { stack ->
+            val pData = stack.mallocPointer(1)
+            vkMapMemory(dev, cameraBuffer!!.memory, 0, 64, 0, pData)
+            val mapped = pData.getByteBuffer(0, 64)
+            mapped.putFloat(posX).putFloat(posY).putFloat(posZ).putFloat(fov)
+            mapped.putFloat(pitch).putFloat(yaw).putFloat(nearPlane).putFloat(farPlane)
+            mapped.putFloat(jitterX).putFloat(jitterY)
+            mapped.putFloat(0f).putFloat(0f) // padding
+            mapped.putInt(spp).putInt(maxBounces)
+            mapped.putInt(0).putInt(0) // reserved
+            vkUnmapMemory(dev, cameraBuffer!!.memory)
+        }
     }
+
+    fun getCameraBuffer(): VulkanBuffer? = cameraBuffer
 
     private fun alignUp(value: Int, alignment: Int): Int {
         return (value + alignment - 1) and (alignment - 1).inv()
@@ -344,6 +447,8 @@ class RayTracingPipeline @Inject constructor(
         if (descriptorSetLayout != 0L) vkDestroyDescriptorSetLayout(dev, descriptorSetLayout, null)
         if (descriptorPool != 0L) vkDestroyDescriptorPool(dev, descriptorPool, null)
         if (sbtBuffer != 0L) { vkDestroyBuffer(dev, sbtBuffer, null); vkFreeMemory(dev, sbtMemory, null) }
+        cameraBuffer?.let { VulkanMemory.destroyBuffer(ctx, it) }
+        cameraBuffer = null
         shaderCompiler.destroy()
         log.info("RT pipeline destroyed")
     }

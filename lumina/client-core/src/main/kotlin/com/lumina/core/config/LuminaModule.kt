@@ -12,7 +12,10 @@ import com.lumina.renderer.postfx.PostProcessStack
 import com.lumina.renderer.rt.AccelerationStructureManager
 import com.lumina.renderer.rt.RayTracingPipeline
 import com.lumina.renderer.upscale.UpscaleManager
+import com.lumina.renderer.camera.CameraController
+import com.lumina.renderer.scene.SceneBufferManager
 import com.lumina.renderer.vulkan.FrameManager
+import com.lumina.renderer.vulkan.RenderTargets
 import com.lumina.renderer.vulkan.ShaderCompiler
 import com.lumina.renderer.vulkan.VulkanContext
 import com.lumina.scene.extract.OsrsSceneExtractor
@@ -45,8 +48,11 @@ class LuminaModule(
         bind(PostProcessStack::class.java).asEagerSingleton()
         bind(UpscaleManager::class.java).asEagerSingleton()
         bind(FrameManager::class.java).asEagerSingleton()
+        bind(RenderTargets::class.java).asEagerSingleton()
         bind(ShaderCompiler::class.java).asEagerSingleton()
         bind(LuminaRenderer::class.java).asEagerSingleton()
+        bind(CameraController::class.java).asEagerSingleton()
+        bind(SceneBufferManager::class.java).asEagerSingleton()
         bind(OsrsSceneExtractor::class.java).asEagerSingleton()
         bind(ModelPackManager::class.java).asEagerSingleton()
         bind(ConfigManager::class.java).asEagerSingleton()
