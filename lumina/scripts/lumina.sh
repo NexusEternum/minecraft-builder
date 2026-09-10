@@ -29,8 +29,10 @@ fi
 
 exec java \
     -Xmx4g \
+    -Xss4m \
     -XX:+UseZGC \
     --add-opens java.base/java.lang=ALL-UNNAMED \
     -Dorg.lwjgl.util.DebugLoader=true \
+    -Dorg.lwjgl.system.stackSize=2048 \
     -jar "$FAT_JAR" \
     "$@"

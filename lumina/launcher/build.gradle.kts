@@ -10,7 +10,8 @@ application {
         "-Xss4m",
         "-XX:+UseZGC",
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
-        "-Dorg.lwjgl.util.DebugLoader=true"
+        "-Dorg.lwjgl.util.DebugLoader=true",
+        "-Dorg.lwjgl.system.stackSize=2048"
     )
 }
 
@@ -78,6 +79,7 @@ tasks.register<JavaExec>("runDemo") {
         "-Xmx4g",
         "-Xss4m",
         "-XX:+UseZGC",
-        "--add-opens", "java.base/java.lang=ALL-UNNAMED"
+        "--add-opens", "java.base/java.lang=ALL-UNNAMED",
+        "-Dorg.lwjgl.system.stackSize=2048"
     )
 }
