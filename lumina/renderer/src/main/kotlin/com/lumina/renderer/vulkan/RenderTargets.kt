@@ -62,7 +62,7 @@ class RenderTargets @Inject constructor(
         upscaleOutput = VulkanMemory.createImage(ctx, displayW, displayH, VK_FORMAT_R32G32B32A32_SFLOAT, storageUsage, deviceLocal)
         upscaleHistory = VulkanMemory.createImage(ctx, displayW, displayH, VK_FORMAT_R32G32B32A32_SFLOAT, storageUsage, deviceLocal)
 
-        tonemapOutput = VulkanMemory.createImage(ctx, displayW, displayH, VK_FORMAT_R8G8B8A8_UNORM,
+        tonemapOutput = VulkanMemory.createImage(ctx, renderW, renderH, VK_FORMAT_R8G8B8A8_UNORM,
             storageUsage or VK_IMAGE_USAGE_TRANSFER_SRC_BIT, deviceLocal)
 
         log.info("Render targets created: render={}x{}, display={}x{}", renderW, renderH, displayW, displayH)

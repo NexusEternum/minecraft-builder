@@ -92,6 +92,16 @@ class PostProcessStack @Inject constructor(
         )
     }
 
+    fun updateTonemapDescriptors(inputImage: VulkanImage, outputImage: VulkanImage) {
+        val tonemap = tonemapPipeline ?: return
+        ComputePipelineFactory.updateImageBinding(ctx, tonemap.descriptorSet, 0, inputImage.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, tonemap.descriptorSet, 1, outputImage.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+    }
+
+    fun recordTonemapOnly(cmdBuf: VkCommandBuffer, displayW: Int, displayH: Int) {
+        recordTonemap(cmdBuf, width, height)
+    }
+
     fun updateDescriptors(inputImage: VulkanImage, depthImage: VulkanImage, outputImage: VulkanImage) {
         val bloom = bloomPipeline ?: return
         val vol = volumetricPipeline ?: return

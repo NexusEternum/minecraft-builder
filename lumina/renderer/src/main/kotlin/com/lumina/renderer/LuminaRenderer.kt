@@ -6,6 +6,7 @@ import com.lumina.renderer.rt.AccelerationStructureManager
 import com.lumina.renderer.rt.RayTracingPipeline
 import com.lumina.renderer.upscale.UpscaleManager
 import com.lumina.renderer.upscale.UpscaleMode
+import com.lumina.renderer.scene.SceneBufferManager
 import com.lumina.renderer.vulkan.FrameManager
 import com.lumina.renderer.vulkan.RenderTargets
 import com.lumina.renderer.vulkan.ShaderCompiler
@@ -14,7 +15,7 @@ import com.lumina.scene.graph.SceneGraph
 import org.lwjgl.system.MemoryStack
 import org.lwjgl.vulkan.KHRSwapchain.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
 import org.lwjgl.vulkan.VK13.*
-import org.lwjgl.vulkan.VkImageCopy
+import org.lwjgl.vulkan.VkImageBlit
 import org.lwjgl.vulkan.VkImageMemoryBarrier
 import org.slf4j.LoggerFactory
 import javax.inject.Inject
@@ -31,7 +32,8 @@ class LuminaRenderer @Inject constructor(
     val upscale: UpscaleManager,
     val frameManager: FrameManager,
     val renderTargets: RenderTargets,
-    val shaderCompiler: ShaderCompiler
+    val shaderCompiler: ShaderCompiler,
+    val sceneBufferManager: SceneBufferManager
 ) {
     private val log = LoggerFactory.getLogger(LuminaRenderer::class.java)
 
@@ -62,21 +64,18 @@ class LuminaRenderer @Inject constructor(
         if (!descriptorsDirty) return
         descriptorsDirty = false
 
-        rtPipeline.updateDescriptors(renderTargets, rtPipeline.getCameraBuffer())
+        rtPipeline.updateDescriptors(
+            renderTargets, rtPipeline.getCameraBuffer(),
+            sceneBufferManager.vertexBuffer,
+            sceneBufferManager.indexBuffer,
+            sceneBufferManager.materialBuffer
+        )
 
-        denoiser.updateDescriptors()
-
-        val denoiseOut = renderTargets.denoiseOutput ?: return
-        val normalDepth = renderTargets.rtNormalDepth ?: return
+        val rtOutput = renderTargets.rtOutputColor ?: return
         val tonemapOut = renderTargets.tonemapOutput ?: return
 
-        if (upscale.mode == UpscaleMode.NONE) {
-            postProcess.updateDescriptors(denoiseOut, normalDepth, tonemapOut)
-        } else {
-            postProcess.updateDescriptors(renderTargets.upscaleOutput ?: denoiseOut, normalDepth, tonemapOut)
-        }
-
-        upscale.updateDescriptors()
+        // Wire tonemap to read directly from RT output
+        postProcess.updateTonemapDescriptors(rtOutput, tonemapOut)
     }
 
     fun renderFrame() {
@@ -98,30 +97,19 @@ class LuminaRenderer @Inject constructor(
         val frameCtx = frameManager.beginFrame() ?: return
         val cmdBuf = frameCtx.commandBuffer
 
-        // Transition all render targets to GENERAL on first use
         renderTargets.transitionAllToGeneral(cmdBuf)
 
-        // 1. Path trace via hardware RT
+        // 1. Path trace via hardware RT -> writes rtOutputColor
         rtPipeline.recordCommands(cmdBuf, upscale.renderWidth, upscale.renderHeight)
 
         // Barrier: RT writes -> compute reads
         insertRTToComputeBarrier(cmdBuf)
 
-        // 2. Denoise (SVGF temporal + A-Trous)
-        denoiser.recordCommands(cmdBuf)
+        // 2. Tonemap directly from RT output for now (skip denoise/upscale/postfx
+        //    until the full pipeline data flow is validated)
+        postProcess.recordTonemapOnly(cmdBuf, vkContext.width, vkContext.height)
 
-        RenderTargets.insertComputeBarrier(cmdBuf)
-
-        // 3. Upscale (FSR 2.0)
-        if (upscale.mode != UpscaleMode.NONE) {
-            upscale.recordCommands(cmdBuf, deltaTime)
-            RenderTargets.insertComputeBarrier(cmdBuf)
-        }
-
-        // 4. Post-processing (bloom, volumetric fog, tone mapping)
-        postProcess.recordCommands(cmdBuf, vkContext.width, vkContext.height)
-
-        // 5. Copy tonemapped result to swapchain image
+        // 3. Copy tonemapped result to swapchain image
         copyToSwapchain(cmdBuf, frameCtx.imageIndex)
 
         frameManager.endFrame(frameCtx)
@@ -146,9 +134,10 @@ class LuminaRenderer @Inject constructor(
         val swapchainImage = vkContext.swapchainImages.getOrNull(imageIndex) ?: return
 
         MemoryStack.stackPush().use { stack ->
+            val barriers = VkImageMemoryBarrier.calloc(2, stack)
+
             // Transition tonemap output: GENERAL -> TRANSFER_SRC
-            val srcBarrier = VkImageMemoryBarrier.calloc(1, stack)
-            srcBarrier.get(0)
+            barriers.get(0)
                 .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
                 .oldLayout(VK_IMAGE_LAYOUT_GENERAL)
                 .newLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
@@ -157,13 +146,12 @@ class LuminaRenderer @Inject constructor(
                 .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
                 .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
                 .image(tonemapImg.image)
-            srcBarrier.get(0).subresourceRange()
+            barriers.get(0).subresourceRange()
                 .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
                 .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1)
 
             // Transition swapchain image: UNDEFINED -> TRANSFER_DST
-            val dstBarrier = VkImageMemoryBarrier.calloc(1, stack)
-            dstBarrier.get(0)
+            barriers.get(1)
                 .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
                 .oldLayout(VK_IMAGE_LAYOUT_UNDEFINED)
                 .newLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
@@ -172,37 +160,38 @@ class LuminaRenderer @Inject constructor(
                 .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
                 .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
                 .image(swapchainImage)
-            dstBarrier.get(0).subresourceRange()
+            barriers.get(1).subresourceRange()
                 .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
                 .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1)
 
-            val combined = VkImageMemoryBarrier.calloc(2, stack)
-            combined.put(0, srcBarrier.get(0))
-            combined.put(1, dstBarrier.get(0))
             vkCmdPipelineBarrier(cmdBuf,
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                0, null, null, combined)
+                0, null, null, barriers)
 
-            // Copy (using vkCmdCopyImage since both are same dimensions)
-            val copyRegion = VkImageCopy.calloc(1, stack)
-            copyRegion.get(0).let { region ->
+            // Blit (handles format conversion + scaling: render res -> display res)
+            val blitRegion = VkImageBlit.calloc(1, stack)
+            blitRegion.get(0).let { region ->
                 region.srcSubresource()
                     .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
                     .mipLevel(0).baseArrayLayer(0).layerCount(1)
+                region.srcOffsets(0).x(0).y(0).z(0)
+                region.srcOffsets(1).x(tonemapImg.width).y(tonemapImg.height).z(1)
                 region.dstSubresource()
                     .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
                     .mipLevel(0).baseArrayLayer(0).layerCount(1)
-                region.extent().width(vkContext.width).height(vkContext.height).depth(1)
+                region.dstOffsets(0).x(0).y(0).z(0)
+                region.dstOffsets(1).x(vkContext.width).y(vkContext.height).z(1)
             }
 
-            vkCmdCopyImage(cmdBuf,
+            vkCmdBlitImage(cmdBuf,
                 tonemapImg.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                copyRegion)
+                blitRegion, VK_FILTER_NEAREST)
 
-            // Transition swapchain image: TRANSFER_DST -> PRESENT_SRC
-            val presentBarrier = VkImageMemoryBarrier.calloc(1, stack)
-            presentBarrier.get(0)
+            // Transition swapchain: TRANSFER_DST -> PRESENT_SRC
+            // Transition tonemap: TRANSFER_SRC -> GENERAL
+            val postBarriers = VkImageMemoryBarrier.calloc(2, stack)
+            postBarriers.get(0)
                 .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
                 .oldLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
                 .newLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
@@ -211,17 +200,11 @@ class LuminaRenderer @Inject constructor(
                 .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
                 .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
                 .image(swapchainImage)
-            presentBarrier.get(0).subresourceRange()
+            postBarriers.get(0).subresourceRange()
                 .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
                 .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1)
 
-            vkCmdPipelineBarrier(cmdBuf,
-                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                0, null, null, presentBarrier)
-
-            // Transition tonemap output back to GENERAL
-            val backBarrier = VkImageMemoryBarrier.calloc(1, stack)
-            backBarrier.get(0)
+            postBarriers.get(1)
                 .sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER)
                 .oldLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
                 .newLayout(VK_IMAGE_LAYOUT_GENERAL)
@@ -230,13 +213,14 @@ class LuminaRenderer @Inject constructor(
                 .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
                 .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
                 .image(tonemapImg.image)
-            backBarrier.get(0).subresourceRange()
+            postBarriers.get(1).subresourceRange()
                 .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
                 .baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1)
 
             vkCmdPipelineBarrier(cmdBuf,
-                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                0, null, null, backBarrier)
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT or VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0, null, null, postBarriers)
         }
     }
 
