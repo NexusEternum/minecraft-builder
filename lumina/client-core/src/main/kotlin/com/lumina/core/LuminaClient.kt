@@ -72,9 +72,9 @@ class LuminaClient(private val args: Array<String>) {
         sceneBufferManager.uploadSceneData()
         log.info("Demo scene loaded and uploaded to GPU")
 
-        // Position camera to view the scene
+        // Position camera to view the scene (yaw=0 looks toward -Z, pitch>0 looks down)
         camera.setPosition(0f, 8f, 20f)
-        camera.setRotation(-0.3f, 3.14f)
+        camera.setRotation(0.3f, 0f)
 
         val developerMode = "--developer-mode" in args || "--demo" in args
         pluginManager = PluginManager(injector, developerMode)
