@@ -68,6 +68,12 @@ class OsrsMapLoaderTest {
     }
 
     @Test
+    fun loadUpperPlanesDefaultsFalse() {
+        val loader = OsrsMapLoader(SceneGraph(), XteaKeyService())
+        assertFalse(loader.loadUpperPlanes)
+    }
+
+    @Test
     fun upperPlaneTileFilterRequiresOverlayUnderlayOrLocation() {
         assertTrue(OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 1, underlayId = 0, hasLocation = false))
         assertTrue(OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 0, underlayId = 2, hasLocation = false))

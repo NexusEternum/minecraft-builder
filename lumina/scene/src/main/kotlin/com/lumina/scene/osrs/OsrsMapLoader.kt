@@ -41,6 +41,12 @@ class OsrsMapLoader @Inject constructor(
     var sceneOriginBaseY: Int = 0
         private set
 
+    /**
+     * When false (default), only plane 0 terrain and objects are loaded (b15 behaviour).
+     * When true, planes 1–3 terrain (filtered) and all-plane objects are loaded for rooftops.
+     */
+    var loadUpperPlanes: Boolean = false
+
     fun loadRegion(cacheDir: File, regionId: Int): Boolean {
         sceneOriginBaseX = 0
         sceneOriginBaseY = 0
@@ -197,17 +203,22 @@ class OsrsMapLoader @Inject constructor(
             sceneGraph.clear()
         }
 
-        if (!bridgeHandlingLogged) {
+        if (!bridgeHandlingLogged && loadUpperPlanes) {
             log.info("Bridge tile plane shifting (tile setting 0x2) not implemented — plane 0 only for bridged tiles")
             bridgeHandlingLogged = true
         }
 
-        val locationTilesByPlane = buildLocationTileMasks(region)
+        val locationTilesByPlane = if (loadUpperPlanes) {
+            buildLocationTileMasks(region)
+        } else {
+            Array(PLANE_COUNT) { emptySet() }
+        }
         var tileCount = 0
         var terrainTriangleCount = 0
         var terrainMeshCount = 0
+        val planeLimit = if (loadUpperPlanes) PLANE_COUNT else 1
 
-        for (plane in 0 until PLANE_COUNT) {
+        for (plane in 0 until planeLimit) {
             for (chunkX in 0 until CHUNKS_PER_AXIS) {
                 for (chunkY in 0 until CHUNKS_PER_AXIS) {
                     val startX = chunkX * CHUNK_SIZE
@@ -362,6 +373,7 @@ class OsrsMapLoader @Inject constructor(
             val position = location.position ?: continue
             val objectPlane = position.z
             if (objectPlane !in 0 until PLANE_COUNT) continue
+            if (!loadUpperPlanes && objectPlane != 0) continue
 
             try {
                 val objectDef = objectManager.getObject(location.id)
