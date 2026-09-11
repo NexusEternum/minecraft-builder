@@ -11,6 +11,9 @@ import org.slf4j.LoggerFactory
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** Bumped on renderer-affecting commits so screenshots prove which build is running. */
+const val BUILD_STAMP = "b7-specfix"
+
 @Singleton
 class OverlayRenderer @Inject constructor(
     private val ctx: VulkanContext,
@@ -52,7 +55,7 @@ class OverlayRenderer @Inject constructor(
     }
 
     private fun buildTitle(avgFps: Double, minFps: Float): String {
-        val sb = StringBuilder("Lumina - OSRS")
+        val sb = StringBuilder("Lumina - OSRS [build $BUILD_STAMP]")
         if (showFps) {
             sb.append(" | FPS: $smoothFps (avg: ${avgFps.toInt()}, min: ${minFps.toInt()})")
             sb.append(" | ${ctx.width}x${ctx.height}")
