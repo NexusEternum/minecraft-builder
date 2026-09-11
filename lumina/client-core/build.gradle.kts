@@ -23,4 +23,10 @@ dependencies {
 
     val lwjglVersion: String by project
     implementation("org.lwjgl:lwjgl-glfw:$lwjglVersion")
+
+    testImplementation("org.junit.jupiter:junit-jupiter:${property("junitVersion")}")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }

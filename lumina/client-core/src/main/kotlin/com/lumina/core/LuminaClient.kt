@@ -10,6 +10,7 @@ import com.lumina.core.game.JagexLauncherIPC
 import com.lumina.plugin.*
 import com.lumina.renderer.LuminaRenderer
 import com.lumina.renderer.camera.CameraController
+import com.lumina.renderer.camera.CameraFovFromScale
 import com.lumina.renderer.overlay.BUILD_STAMP
 import com.lumina.renderer.overlay.OverlayRenderer
 import com.lumina.renderer.postfx.PostProcessStack
@@ -382,6 +383,7 @@ class LuminaClient(private val args: Array<String>) {
         )
         camera.setPosition(luminaCamera.x, luminaCamera.y, luminaCamera.z)
         camera.setFromForwardVector(luminaCamera.forwardX, luminaCamera.forwardY, luminaCamera.forwardZ)
+        camera.fov = CameraFovFromScale.verticalFovDegrees(snapshot.canvasHeight, snapshot.cameraScale)
 
         overlay.cameraWorldTileX = snapshot.cameraWorldTileX()
         overlay.cameraWorldTileY = snapshot.cameraWorldTileY()

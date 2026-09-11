@@ -159,37 +159,49 @@ class OsrsMapLoaderTest {
 
 class OsrsColorDecoderTest {
     @Test
-    fun hslDecodeMatchesJagexColorForKnownValues() {
+    fun defaultBrightnessIsVanillaMiddleSetting() {
+        assertEquals(JagexColor.BRIGHTNESS_LOW, OsrsColorDecoder.DEFAULT_BRIGHTNESS, 0.0001)
+    }
+
+    @Test
+    fun hslDecodeAppliesLinearizationFromVanillaBrightness() {
         val cases = intArrayOf(0, 960, 3500, 15200)
         for (hsl in cases) {
-            val expected = JagexColor.HSLtoRGB(hsl.toShort(), JagexColor.BRIGHTNESS_MAX)
+            val srgb = JagexColor.HSLtoRGB(hsl.toShort(), JagexColor.BRIGHTNESS_LOW)
+            val expectedR = OsrsColorDecoder.srgbToLinear(((srgb shr 16) and 0xFF) / 255f)
+            val expectedG = OsrsColorDecoder.srgbToLinear(((srgb shr 8) and 0xFF) / 255f)
+            val expectedB = OsrsColorDecoder.srgbToLinear((srgb and 0xFF) / 255f)
             val decoded = OsrsColorDecoder.hslToRgb(hsl)
-            assertEquals(
-                ((expected shr 16) and 0xFF) / 255f,
-                decoded[0],
-                0.001f,
-                "R mismatch for hsl=$hsl"
-            )
-            assertEquals(
-                ((expected shr 8) and 0xFF) / 255f,
-                decoded[1],
-                0.001f,
-                "G mismatch for hsl=$hsl"
-            )
-            assertEquals(
-                (expected and 0xFF) / 255f,
-                decoded[2],
-                0.001f,
-                "B mismatch for hsl=$hsl"
-            )
+            assertEquals(expectedR, decoded[0], 0.001f, "R mismatch for hsl=$hsl")
+            assertEquals(expectedG, decoded[1], 0.001f, "G mismatch for hsl=$hsl")
+            assertEquals(expectedB, decoded[2], 0.001f, "B mismatch for hsl=$hsl")
         }
     }
 
     @Test
-    fun greenHueIsGreenerThanOldApproximation() {
-        // Hue ~22/63 (green-yellow grass) should have G > R unlike naive HSL with /63 hue scale error
-        val hsl = JagexColor.packHSL(22, 3, 60).toInt()
+    fun greenHueIsGreenDominantNotNearWhite() {
+        val hsl = JagexColor.packHSL(25, 5, 60).toInt()
         val rgb = OsrsColorDecoder.hslToRgb(hsl)
         assertTrue(rgb[1] > rgb[0], "Grass-like HSL should be green-dominant: ${rgb.contentToString()}")
+        assertTrue(rgb[1] > rgb[2], "Grass-like HSL should have strongest green channel")
+        assertTrue(rgb[0] < 0.2f && rgb[2] < 0.3f, "Grass green should not wash to near-white: ${rgb.contentToString()}")
+    }
+
+    @Test
+    fun magentaMarkerSubstitutedForOverlaysUnderlaysAndHsl() {
+        assertTrue(OsrsColorDecoder.isMagentaTextureMarker(0xFF00FF))
+        val fallback = OsrsColorDecoder.texturedFallbackLinear()
+        assertArrayEquals(fallback, OsrsColorDecoder.underlayRgb(0xFF00FF), 0.001f)
+        assertEquals(null, OsrsColorDecoder.overlayRgb(0xFF00FF))
+        assertArrayEquals(fallback, OsrsColorDecoder.texturedFallbackLinear(), 0.001f)
+    }
+
+    @Test
+    fun objectPlaneVisibilityRespectsMaxVisiblePlane() {
+        assertTrue(OsrsMapLoader.isObjectPlaneVisible(0, maxVisiblePlane = 0))
+        assertFalse(OsrsMapLoader.isObjectPlaneVisible(1, maxVisiblePlane = 0))
+        assertTrue(OsrsMapLoader.isObjectPlaneVisible(1, maxVisiblePlane = 1))
+        assertTrue(OsrsMapLoader.isObjectPlaneVisible(2, maxVisiblePlane = 3))
+        assertFalse(OsrsMapLoader.isObjectPlaneVisible(3, maxVisiblePlane = 2))
     }
 }

@@ -42,8 +42,8 @@ class OsrsMapLoader @Inject constructor(
         private set
 
     /**
-     * Highest terrain plane to load (0 = ground only). Objects load on all planes regardless.
-     * OSRS-style roof hiding: when the player is on plane N, terrain for planes 0..N is shown
+     * Highest plane to load for terrain and objects (0 = ground only).
+     * OSRS-style roof hiding: when the player is on plane N, planes 0..N are shown
      * and planes above N are excluded.
      */
     var maxVisiblePlane: Int = 0
@@ -405,7 +405,7 @@ class OsrsMapLoader @Inject constructor(
             val position = location.position ?: continue
             val objectPlane = position.z
             if (objectPlane !in 0 until PLANE_COUNT) continue
-            // Objects load on all planes (roofs/upper walls only exist where buildings are).
+            if (!isObjectPlaneVisible(objectPlane, maxVisiblePlane)) continue
 
             try {
                 val objectDef = objectManager.getObject(location.id)
@@ -537,6 +537,7 @@ class OsrsMapLoader @Inject constructor(
         val idx2 = model.faceIndices2
         val idx3 = model.faceIndices3
         val faceColors = model.faceColors
+        val faceTextures = model.faceTextures
         val faceTransparencies = model.faceTransparencies
 
         val rotatedX = IntArray(vertexCount)
@@ -628,8 +629,15 @@ class OsrsMapLoader @Inject constructor(
                 nz = 0f
             }
 
-            val hsl = if (faceColors != null && face < faceColors.size) faceColors[face].toInt() else 0
-            val rgb = OsrsColorDecoder.hslToRgb(hsl)
+            val hasTexture = faceTextures != null &&
+                face < faceTextures.size &&
+                faceTextures[face].toInt() != -1
+            val rgb = if (hasTexture) {
+                OsrsColorDecoder.texturedFallbackLinear()
+            } else {
+                val hsl = if (faceColors != null && face < faceColors.size) faceColors[face].toInt() else 0
+                OsrsColorDecoder.hslToRgb(hsl)
+            }
             val packedColor = packTileColorToUv(rgb)
 
             val cornerX = floatArrayOf(ax, bx, cx)
@@ -744,6 +752,11 @@ class OsrsMapLoader @Inject constructor(
     }
 
     private fun overlayRgb(overlay: OverlayDefinition): FloatArray? {
+        if (OsrsColorDecoder.isMagentaTextureMarker(overlay.rgbColor) ||
+            OsrsColorDecoder.isMagentaTextureMarker(overlay.secondaryRgbColor)
+        ) {
+            return TEXTURED_OVERLAY_FALLBACK
+        }
         OsrsColorDecoder.overlayRgb(overlay.rgbColor)?.let { return it }
         OsrsColorDecoder.overlayRgb(overlay.secondaryRgbColor)?.let { return it }
         if (overlay.texture >= 0) {
@@ -925,7 +938,7 @@ class OsrsMapLoader @Inject constructor(
         private const val FLOATS_PER_VERTEX = 8
         /** Max placed object instances across the entire multi-region scene (not per region). */
         const val MAX_SCENE_OBJECTS = 12000
-        private val TEXTURED_OVERLAY_FALLBACK = floatArrayOf(0.35f, 0.42f, 0.28f)
+        private val TEXTURED_OVERLAY_FALLBACK = OsrsColorDecoder.texturedFallbackLinear()
         private val TILE_CORNERS = arrayOf(
             intArrayOf(0, 0),
             intArrayOf(1, 0),
@@ -949,6 +962,10 @@ class OsrsMapLoader @Inject constructor(
             overlayId: Int,
             hasLocation: Boolean
         ): Boolean = overlayId != 0 || hasLocation
+
+        /** Objects on planes above [maxVisiblePlane] are hidden (OSRS roof culling). */
+        fun isObjectPlaneVisible(objectPlane: Int, maxVisiblePlane: Int): Boolean =
+            objectPlane in 0 until PLANE_COUNT && objectPlane <= maxVisiblePlane.coerceIn(0, PLANE_COUNT - 1)
 
         /** @deprecated b16 filter; underlay-only tiles are intentionally excluded. */
         @Deprecated("Underlay-only upper tiles blanket the world; use two-arg overload")

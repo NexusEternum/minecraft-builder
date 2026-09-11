@@ -112,7 +112,9 @@ class LiveGameState : LiveGameView {
                 cameraYaw = safeCameraYaw(client),
                 playerLocalX = playerLocalX,
                 playerLocalY = playerLocalY,
-                playerPlane = playerPlane
+                playerPlane = playerPlane,
+                cameraScale = safeCameraScale(client),
+                canvasHeight = safeCanvasHeight(client)
             )
         }
 
@@ -132,7 +134,9 @@ class LiveGameState : LiveGameView {
                 cameraYaw = safeCameraYaw(client),
                 playerLocalX = playerLocalX,
                 playerLocalY = playerLocalY,
-                playerPlane = playerPlane
+                playerPlane = playerPlane,
+                cameraScale = safeCameraScale(client),
+                canvasHeight = safeCanvasHeight(client)
             )
         }
 
@@ -150,7 +154,9 @@ class LiveGameState : LiveGameView {
             cameraYaw = client.cameraYaw,
             playerLocalX = playerLocalX,
             playerLocalY = playerLocalY,
-            playerPlane = playerPlane
+            playerPlane = playerPlane,
+            cameraScale = safeCameraScale(client),
+            canvasHeight = safeCanvasHeight(client)
         )
     }
 
@@ -177,6 +183,12 @@ class LiveGameState : LiveGameView {
 
     private fun safeCameraYaw(client: Client): Int =
         runCatching { client.cameraYaw }.getOrDefault(0)
+
+    private fun safeCameraScale(client: Client): Int =
+        runCatching { client.scale }.getOrDefault(512)
+
+    private fun safeCanvasHeight(client: Client): Int =
+        runCatching { client.canvasHeight }.getOrDefault(503)
 
     companion object {
         /** ~30 Hz camera polling. */
