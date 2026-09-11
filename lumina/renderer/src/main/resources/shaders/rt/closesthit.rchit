@@ -153,6 +153,20 @@ void main() {
     vec3 emissive = materialData[matIdx * 2u + 1u].xyz;
     float metallic = materialData[matIdx * 2u + 1u].w;
 
+    if (metallic > 1.5) {
+        // Vertex-color mode: albedo packed into uv.x bits (rgb8)
+        uint packed0 = floatBitsToUint(v0.uv.x);
+        // NOTE: all three vertices of a terrain triangle carry the same tile color,
+        // so just use v0's.
+        vec3 tileRgb = vec3(
+            float((packed0 >> 16) & 0xFFu),
+            float((packed0 >> 8) & 0xFFu),
+            float(packed0 & 0xFFu)
+        ) / 255.0;
+        albedo *= tileRgb;
+        metallic = 0.0;
+    }
+
     // Debug mode: maxBounces==0 outputs flat albedo with simple directional light
     if (camera.maxBounces == 0u) {
         vec3 sunDir = normalize(vec3(0.65, 0.45, 0.4));
