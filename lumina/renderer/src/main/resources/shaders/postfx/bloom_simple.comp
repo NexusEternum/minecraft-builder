@@ -1,0 +1,63 @@
+#version 460
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(binding = 0, rgba32f) uniform readonly image2D sceneColor;
+layout(binding = 1, rgba16f) uniform image2D bloomTexA;
+layout(binding = 2, rgba16f) uniform image2D bloomTexB;
+
+layout(push_constant) uniform Params {
+    int mode;       // 0=extract, 1=blur horizontal, 2=blur vertical
+    float threshold;
+    float intensity;
+};
+
+const float weights[9] = float[9](
+    0.0162, 0.0540, 0.1216, 0.1945, 0.2270, 0.1945, 0.1216, 0.0540, 0.0162
+);
+
+float luminance(vec3 c) {
+    return max(max(c.r, c.g), c.b);
+}
+
+vec3 extractBright(vec3 color) {
+    float bright = luminance(color);
+    return color * max(bright - threshold, 0.0) / max(bright, 0.001);
+}
+
+vec3 blurHorizontal(ivec2 coord, ivec2 size) {
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < 9; i++) {
+        int off = i - 4;
+        ivec2 sampleCoord = coord;
+        sampleCoord.x = clamp(coord.x + off, 0, size.x - 1);
+        sum += imageLoad(bloomTexA, sampleCoord).rgb * weights[i];
+    }
+    return sum;
+}
+
+vec3 blurVertical(ivec2 coord, ivec2 size) {
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < 9; i++) {
+        int off = i - 4;
+        ivec2 sampleCoord = coord;
+        sampleCoord.y = clamp(coord.y + off, 0, size.y - 1);
+        sum += imageLoad(bloomTexB, sampleCoord).rgb * weights[i];
+    }
+    return sum;
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(bloomTexA);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    if (mode == 0) {
+        vec3 color = imageLoad(sceneColor, coord).rgb;
+        imageStore(bloomTexA, coord, vec4(extractBright(color), 1.0));
+    } else if (mode == 1) {
+        imageStore(bloomTexB, coord, vec4(blurHorizontal(coord, size), 1.0));
+    } else {
+        imageStore(bloomTexA, coord, vec4(blurVertical(coord, size), 1.0));
+    }
+}

@@ -6,6 +6,7 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(binding = 0, rgba32f) uniform image2D sceneColor;
 layout(binding = 1, rgba32f) uniform image2D depthBuffer;
 layout(binding = 2, rgba16f) uniform image2D outputImage;
+layout(binding = 3, rgba16f) uniform readonly image2D bloomTex;
 
 layout(push_constant, scalar) uniform Params {
     float sunDirX, sunDirY, sunDirZ;
@@ -17,6 +18,7 @@ layout(push_constant, scalar) uniform Params {
     int numSteps;
     float scatteringCoeff;
     float time;
+    float bloomIntensity;
 };
 
 // Henyey-Greenstein phase function
@@ -36,6 +38,7 @@ void main() {
     if (coord.x >= size.x || coord.y >= size.y) return;
 
     vec4 color = imageLoad(sceneColor, coord);
+    vec3 sceneRgb = color.rgb + imageLoad(bloomTex, coord).rgb * bloomIntensity;
     // rtNormalDepth packs normal in .xyz and depth in .w
     float depth = imageLoad(depthBuffer, coord).w;
 
@@ -69,6 +72,6 @@ void main() {
         if (transmittance < 0.01) break;
     }
 
-    vec3 result = color.rgb * transmittance + fogAccum;
+    vec3 result = sceneRgb * transmittance + fogAccum;
     imageStore(outputImage, coord, vec4(result, 1.0));
 }

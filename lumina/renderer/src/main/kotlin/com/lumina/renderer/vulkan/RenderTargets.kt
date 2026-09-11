@@ -24,6 +24,8 @@ class RenderTargets @Inject constructor(
 
     var bloomScratchA: VulkanImage? = null; private set
     var bloomScratchB: VulkanImage? = null; private set
+    var bloomTexA: VulkanImage? = null; private set
+    var bloomTexB: VulkanImage? = null; private set
 
     var postfxOutput: VulkanImage? = null; private set
 
@@ -57,6 +59,8 @@ class RenderTargets @Inject constructor(
 
         bloomScratchA = VulkanMemory.createImage(ctx, renderW, renderH, VK_FORMAT_R32G32B32A32_SFLOAT, storageUsage, deviceLocal)
         bloomScratchB = VulkanMemory.createImage(ctx, renderW, renderH, VK_FORMAT_R32G32B32A32_SFLOAT, storageUsage, deviceLocal)
+        bloomTexA = VulkanMemory.createImage(ctx, renderW, renderH, VK_FORMAT_R16G16B16A16_SFLOAT, storageUsage, deviceLocal)
+        bloomTexB = VulkanMemory.createImage(ctx, renderW, renderH, VK_FORMAT_R16G16B16A16_SFLOAT, storageUsage, deviceLocal)
         postfxOutput = VulkanMemory.createImage(ctx, renderW, renderH, VK_FORMAT_R16G16B16A16_SFLOAT, storageUsage, deviceLocal)
 
         upscaleOutput = VulkanMemory.createImage(ctx, displayW, displayH, VK_FORMAT_R32G32B32A32_SFLOAT, storageUsage, deviceLocal)
@@ -74,7 +78,7 @@ class RenderTargets @Inject constructor(
         val allImages = listOfNotNull(
             rtOutputColor, rtNormalDepth, rtMotionVectors,
             denoiseOutput, denoiseHistory, denoiseMoments,
-            bloomScratchA, bloomScratchB, postfxOutput,
+            bloomScratchA, bloomScratchB, bloomTexA, bloomTexB, postfxOutput,
             upscaleOutput, upscaleHistory, tonemapOutput
         )
         transitionImages(cmdBuf, allImages, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
@@ -92,13 +96,13 @@ class RenderTargets @Inject constructor(
         val images = listOfNotNull(
             rtOutputColor, rtNormalDepth, rtMotionVectors,
             denoiseOutput, denoiseHistory, denoiseMoments,
-            bloomScratchA, bloomScratchB, postfxOutput,
+            bloomScratchA, bloomScratchB, bloomTexA, bloomTexB, postfxOutput,
             upscaleOutput, upscaleHistory, tonemapOutput
         )
         images.forEach { VulkanMemory.destroyImage(ctx, it) }
         rtOutputColor = null; rtNormalDepth = null; rtMotionVectors = null
         denoiseOutput = null; denoiseHistory = null; denoiseMoments = null
-        bloomScratchA = null; bloomScratchB = null; postfxOutput = null
+        bloomScratchA = null; bloomScratchB = null; bloomTexA = null; bloomTexB = null; postfxOutput = null
         upscaleOutput = null; upscaleHistory = null; tonemapOutput = null
         initialTransitionDone = false
         log.debug("Render targets destroyed")

@@ -16,18 +16,17 @@ class PostProcessStack @Inject constructor(
 ) {
     private val log = LoggerFactory.getLogger(PostProcessStack::class.java)
 
-    var bloomEnabled: Boolean = false
-    var bloomIntensity: Float = 0.04f
+    var bloomEnabled: Boolean = true
+    var bloomIntensity: Float = 0.5f
     var bloomThreshold: Float = 1.0f
-    var bloomIterations: Int = 6
 
     var volumetricFogEnabled: Boolean = true
-    var fogDensity: Float = 0.02f
+    var fogDensity: Float = 0.004f
     var fogColor: FloatArray = floatArrayOf(0.7f, 0.75f, 0.85f)
     var fogHeight: Float = 50.0f
 
     var godRaysEnabled: Boolean = true
-    var godRayIntensity: Float = 1.0f
+    var godRayIntensity: Float = 0.4f
     var scatteringCoeff: Float = 0.1f
     var volumetricSteps: Int = 64
 
@@ -60,12 +59,13 @@ class PostProcessStack @Inject constructor(
 
     private fun createBloomPipeline() {
         val bindings = listOf(
-            ComputePipelineFactory.BindingDesc(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
-            ComputePipelineFactory.BindingDesc(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
+            ComputePipelineFactory.BindingDesc(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // sceneColor
+            ComputePipelineFactory.BindingDesc(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // bloomTexA
+            ComputePipelineFactory.BindingDesc(2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // bloomTexB
         )
         bloomPipeline = ComputePipelineFactory.create(
-            ctx, shaderCompiler, "/shaders/postfx/bloom.comp", bindings,
-            pushConstantSize = 16 // mode(4) + threshold(4) + intensity(4) + level(4)
+            ctx, shaderCompiler, "/shaders/postfx/bloom_simple.comp", bindings,
+            pushConstantSize = 12 // mode(4) + threshold(4) + intensity(4)
         )
     }
 
@@ -74,10 +74,11 @@ class PostProcessStack @Inject constructor(
             ComputePipelineFactory.BindingDesc(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // sceneColor
             ComputePipelineFactory.BindingDesc(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // depthBuffer
             ComputePipelineFactory.BindingDesc(2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // output
+            ComputePipelineFactory.BindingDesc(3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // bloomTexA
         )
         volumetricPipeline = ComputePipelineFactory.create(
             ctx, shaderCompiler, "/shaders/postfx/volumetric.comp", bindings,
-            pushConstantSize = 60 // sunDir(12)+fogDens(4)+fogColor(12)+fogH(4)+sunCol(12)+godRay(4)+numSteps(4)+scatter(4)+time(4)
+            pushConstantSize = 64 // sunDir(12)+fogDens(4)+fogColor(12)+fogH(4)+sunCol(12)+godRay(4)+numSteps(4)+scatter(4)+time(4)+bloomIntensity(4)
         )
     }
 
@@ -108,12 +109,14 @@ class PostProcessStack @Inject constructor(
         val tonemap = tonemapPipeline ?: return
         val rt = renderTargets
 
-        ComputePipelineFactory.updateImageBinding(ctx, bloom.descriptorSet, 0, rt.bloomScratchA!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-        ComputePipelineFactory.updateImageBinding(ctx, bloom.descriptorSet, 1, rt.bloomScratchB!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, bloom.descriptorSet, 0, inputImage.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, bloom.descriptorSet, 1, rt.bloomTexA!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, bloom.descriptorSet, 2, rt.bloomTexB!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
 
         ComputePipelineFactory.updateImageBinding(ctx, vol.descriptorSet, 0, inputImage.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
         ComputePipelineFactory.updateImageBinding(ctx, vol.descriptorSet, 1, depthImage.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
         ComputePipelineFactory.updateImageBinding(ctx, vol.descriptorSet, 2, rt.postfxOutput!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, vol.descriptorSet, 3, rt.bloomTexA!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
 
         ComputePipelineFactory.updateImageBinding(ctx, tonemap.descriptorSet, 0, rt.postfxOutput!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
         ComputePipelineFactory.updateImageBinding(ctx, tonemap.descriptorSet, 1, outputImage.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
@@ -144,55 +147,16 @@ class PostProcessStack @Inject constructor(
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                 bloom.pipelineLayout, 0, stack.longs(bloom.descriptorSet), null)
 
-            // Threshold pass
-            val pushData = stack.calloc(16)
-            pushData.putInt(0) // mode=threshold
-            pushData.putFloat(bloomThreshold)
-            pushData.putFloat(bloomIntensity)
-            pushData.putInt(0) // level
-            pushData.flip()
-            vkCmdPushConstants(cmdBuf, bloom.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushData)
-        }
-        vkCmdDispatch(cmdBuf, groupsX, groupsY, 1)
-        RenderTargets.insertComputeBarrier(cmdBuf)
-
-        // Downsample chain
-        for (level in 0 until bloomIterations) {
-            val scale = 1 shl (level + 1)
-            val gx = ((width / scale) + 15) / 16
-            val gy = ((height / scale) + 15) / 16
-            if (gx <= 0 || gy <= 0) break
-
-            MemoryStack.stackPush().use { stack ->
-                val pushData = stack.calloc(16)
-                pushData.putInt(1) // mode=downsample
+            for (mode in 0..2) {
+                val pushData = stack.calloc(12)
+                pushData.putInt(mode)
                 pushData.putFloat(bloomThreshold)
                 pushData.putFloat(bloomIntensity)
-                pushData.putInt(level)
                 pushData.flip()
-                vkCmdPushConstants(cmdBuf, bloomPipeline!!.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushData)
+                vkCmdPushConstants(cmdBuf, bloom.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushData)
+                vkCmdDispatch(cmdBuf, groupsX, groupsY, 1)
+                if (mode < 2) RenderTargets.insertComputeBarrier(cmdBuf)
             }
-            vkCmdDispatch(cmdBuf, gx, gy, 1)
-            RenderTargets.insertComputeBarrier(cmdBuf)
-        }
-
-        // Upsample chain
-        for (level in bloomIterations - 1 downTo 0) {
-            val scale = 1 shl level
-            val gx = ((width / scale) + 15) / 16
-            val gy = ((height / scale) + 15) / 16
-
-            MemoryStack.stackPush().use { stack ->
-                val pushData = stack.calloc(16)
-                pushData.putInt(2) // mode=upsample
-                pushData.putFloat(bloomThreshold)
-                pushData.putFloat(bloomIntensity)
-                pushData.putInt(level)
-                pushData.flip()
-                vkCmdPushConstants(cmdBuf, bloomPipeline!!.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushData)
-            }
-            vkCmdDispatch(cmdBuf, gx, gy, 1)
-            if (level > 0) RenderTargets.insertComputeBarrier(cmdBuf)
         }
     }
 
@@ -206,7 +170,7 @@ class PostProcessStack @Inject constructor(
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                 vol.pipelineLayout, 0, stack.longs(vol.descriptorSet), null)
 
-            val pushData = stack.calloc(60)
+            val pushData = stack.calloc(64)
             pushData.putFloat(sunDirection[0])
             pushData.putFloat(sunDirection[1])
             pushData.putFloat(sunDirection[2])
@@ -222,6 +186,7 @@ class PostProcessStack @Inject constructor(
             pushData.putInt(volumetricSteps)
             pushData.putFloat(scatteringCoeff)
             pushData.putFloat(timeOfDay)
+            pushData.putFloat(if (bloomEnabled) bloomIntensity else 0f)
             pushData.flip()
             vkCmdPushConstants(cmdBuf, vol.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushData)
         }
