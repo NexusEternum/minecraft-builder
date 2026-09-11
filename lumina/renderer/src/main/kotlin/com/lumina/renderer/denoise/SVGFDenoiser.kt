@@ -18,10 +18,14 @@ class SVGFDenoiser @Inject constructor(
 
     private var temporalPipeline: ComputePipelineBundle? = null
     private var atrousPipeline: ComputePipelineBundle? = null
+    // A-Trous ping-pong: denoiseOutput → bloomScratchA → bloomScratchB → bloomScratchA.
+    // denoiseOutput is never overwritten so copyDenoiseHistory still gets the temporal pass result.
+    private var atrousDescriptorSetA: Long = 0
+    private var atrousDescriptorSetB: Long = 0
+    private var atrousDescriptorSetC: Long = 0
 
-    // Static descriptor set: all A-Trous iterations read/write the same images, so only the last pass matters.
-    var atrousIterations: Int = 1
-    var temporalAlpha: Float = 0.2f
+    var atrousIterations: Int = 3
+    var temporalAlpha: Float = 0.1f
     var momentAlpha: Float = 0.3f
     var sigmaLuminance: Float = 4.0f
     var sigmaNormal: Float = 128.0f
@@ -62,8 +66,13 @@ class SVGFDenoiser @Inject constructor(
         )
         atrousPipeline = ComputePipelineFactory.create(
             ctx, shaderCompiler, "/shaders/denoise/svgf_atrous.comp", bindings,
-            pushConstantSize = 20 // stepSize(4) + sigmaLum(4) + sigmaNorm(4) + sigmaDepth(4) + iteration(4)
+            pushConstantSize = 20, // stepSize(4) + sigmaLum(4) + sigmaNorm(4) + sigmaDepth(4) + iteration(4)
+            maxDescriptorSets = 3
         )
+        val atrous = atrousPipeline!!
+        atrousDescriptorSetA = atrous.descriptorSet
+        atrousDescriptorSetB = ComputePipelineFactory.allocateDescriptorSet(ctx, atrous)
+        atrousDescriptorSetC = ComputePipelineFactory.allocateDescriptorSet(ctx, atrous)
     }
 
     fun updateDescriptors() {
@@ -77,11 +86,30 @@ class SVGFDenoiser @Inject constructor(
         ComputePipelineFactory.updateImageBinding(ctx, temporal.descriptorSet, 4, rt.denoiseOutput!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
         ComputePipelineFactory.updateImageBinding(ctx, temporal.descriptorSet, 5, rt.denoiseMoments!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
 
-        val atrous = atrousPipeline ?: return
-        ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 0, rt.denoiseOutput!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-        ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 1, rt.rtNormalDepth!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-        ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 2, rt.denoiseMoments!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-        ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 3, rt.bloomScratchA!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        if (atrousDescriptorSetA == 0L) return
+        val normalDepth = rt.rtNormalDepth!!.view
+        val moments = rt.denoiseMoments!!.view
+        val denoiseOut = rt.denoiseOutput!!.view
+        val scratchA = rt.bloomScratchA!!.view
+        val scratchB = rt.bloomScratchB!!.view
+
+        // Set A: temporal output → bloomScratchA
+        ComputePipelineFactory.updateImageBinding(ctx, atrousDescriptorSetA, 0, denoiseOut, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrousDescriptorSetA, 1, normalDepth, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrousDescriptorSetA, 2, moments, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrousDescriptorSetA, 3, scratchA, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+
+        // Set B: bloomScratchA → bloomScratchB
+        ComputePipelineFactory.updateImageBinding(ctx, atrousDescriptorSetB, 0, scratchA, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrousDescriptorSetB, 1, normalDepth, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrousDescriptorSetB, 2, moments, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrousDescriptorSetB, 3, scratchB, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+
+        // Set C: bloomScratchB → bloomScratchA (final denoised scene for post-process)
+        ComputePipelineFactory.updateImageBinding(ctx, atrousDescriptorSetC, 0, scratchB, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrousDescriptorSetC, 1, normalDepth, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrousDescriptorSetC, 2, moments, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrousDescriptorSetC, 3, scratchA, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
     }
 
     fun recordCommands(cmdBuf: VkCommandBuffer) {
@@ -108,16 +136,16 @@ class SVGFDenoiser @Inject constructor(
 
         RenderTargets.insertComputeBarrier(cmdBuf)
 
-        // Passes 2..N: A-Trous wavelet filter
+        // Passes 2..N: A-Trous wavelet filter (ping-pong across three descriptor sets)
         vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, atrous.pipeline)
-        MemoryStack.stackPush().use { stack ->
-            vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
-                atrous.pipelineLayout, 0, stack.longs(atrous.descriptorSet), null)
-        }
+        val atrousSets = longArrayOf(atrousDescriptorSetA, atrousDescriptorSetB, atrousDescriptorSetC)
 
         for (i in 0 until atrousIterations) {
             val stepSize = 1 shl i
             MemoryStack.stackPush().use { stack ->
+                vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
+                    atrous.pipelineLayout, 0, stack.longs(atrousSets[i % atrousSets.size]), null)
+
                 val pushData = stack.calloc(20)
                 pushData.putInt(stepSize)
                 pushData.putFloat(sigmaLuminance)
@@ -147,6 +175,9 @@ class SVGFDenoiser @Inject constructor(
         atrousPipeline?.let { ComputePipelineFactory.destroy(ctx, it) }
         temporalPipeline = null
         atrousPipeline = null
+        atrousDescriptorSetA = 0
+        atrousDescriptorSetB = 0
+        atrousDescriptorSetC = 0
         log.info("SVGF denoiser destroyed")
     }
 }

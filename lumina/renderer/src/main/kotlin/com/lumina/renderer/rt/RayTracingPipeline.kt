@@ -35,7 +35,7 @@ class RayTracingPipeline @Inject constructor(
     private var hitRegion = VkStridedDeviceAddressRegionKHR.create()
     private var callableRegion = VkStridedDeviceAddressRegionKHR.create()
 
-    var spp: Int = 1
+    var spp: Int = 2
     var maxBounces: Int = 4
 
     fun init() {

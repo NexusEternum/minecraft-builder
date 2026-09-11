@@ -12,6 +12,7 @@ layout(push_constant) uniform Params {
     float sigmaLuminance;
     float sigmaNormal;
     float sigmaDepth;
+    int iteration;
 };
 
 const float kernel[3] = float[](1.0, 2.0/3.0, 1.0/6.0);

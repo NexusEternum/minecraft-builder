@@ -17,16 +17,16 @@ class PostProcessStack @Inject constructor(
     private val log = LoggerFactory.getLogger(PostProcessStack::class.java)
 
     var bloomEnabled: Boolean = true
-    var bloomIntensity: Float = 0.5f
-    var bloomThreshold: Float = 1.0f
+    var bloomIntensity: Float = 0.3f
+    var bloomThreshold: Float = 1.3f
 
     var volumetricFogEnabled: Boolean = true
-    var fogDensity: Float = 0.004f
+    var fogDensity: Float = 0.0012f
     var fogColor: FloatArray = floatArrayOf(0.7f, 0.75f, 0.85f)
     var fogHeight: Float = 50.0f
 
     var godRaysEnabled: Boolean = true
-    var godRayIntensity: Float = 0.4f
+    var godRayIntensity: Float = 0.25f
     var scatteringCoeff: Float = 0.1f
     var volumetricSteps: Int = 64
 

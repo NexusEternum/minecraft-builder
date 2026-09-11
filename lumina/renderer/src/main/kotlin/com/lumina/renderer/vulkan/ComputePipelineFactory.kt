@@ -28,7 +28,8 @@ object ComputePipelineFactory {
         shaderCompiler: ShaderCompiler,
         shaderPath: String,
         bindings: List<BindingDesc>,
-        pushConstantSize: Int = 0
+        pushConstantSize: Int = 0,
+        maxDescriptorSets: Int = 1
     ): ComputePipelineBundle {
         val dev = ctx.device!!
 
@@ -80,12 +81,12 @@ object ComputePipelineFactory {
                 .map { (type, list) -> type to list.sumOf { it.count } }
             val poolSizes = VkDescriptorPoolSize.calloc(typeCounts.size, stack)
             for ((i, pair) in typeCounts.withIndex()) {
-                poolSizes.get(i).type(pair.first).descriptorCount(pair.second)
+                poolSizes.get(i).type(pair.first).descriptorCount(pair.second * maxDescriptorSets)
             }
 
             val poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO)
-                .maxSets(1)
+                .maxSets(maxDescriptorSets)
                 .pPoolSizes(poolSizes)
 
             val pPool = stack.mallocLong(1)
@@ -121,6 +122,20 @@ object ComputePipelineFactory {
 
         log.debug("Created compute pipeline for {}", shaderPath)
         return ComputePipelineBundle(pipeline, pipelineLayout, descriptorSetLayout, descriptorPool, descriptorSet)
+    }
+
+    fun allocateDescriptorSet(ctx: VulkanContext, bundle: ComputePipelineBundle): Long {
+        val dev = ctx.device!!
+        MemoryStack.stackPush().use { stack ->
+            val allocInfo = VkDescriptorSetAllocateInfo.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO)
+                .descriptorPool(bundle.descriptorPool)
+                .pSetLayouts(stack.longs(bundle.descriptorSetLayout))
+
+            val pSet = stack.mallocLong(1)
+            check(vkAllocateDescriptorSets(dev, allocInfo, pSet) == VK_SUCCESS)
+            return pSet.get(0)
+        }
     }
 
     fun updateImageBinding(ctx: VulkanContext, descriptorSet: Long, binding: Int, imageView: Long, type: Int) {
