@@ -83,8 +83,12 @@ class LuminaClient(private val args: Array<String>) {
         if (osrsLoaded) {
             sceneBufferManager.uploadSceneData()
             log.info("OSRS terrain loaded and uploaded to GPU")
-            camera.setPosition(81f, 30f, 81f)
-            camera.setRotation(-0.5f, 0f)
+            camera.setPosition(
+                osrsMapLoader.lastRegionCenterWorldX,
+                osrsMapLoader.lastRegionCenterWorldY,
+                osrsMapLoader.lastRegionCenterWorldZ
+            )
+            camera.setRotation(-0.35f, 0f)
         } else {
             if (osrsRegionId >= 0) {
                 log.warn("OSRS terrain load failed; falling back to demo scene")

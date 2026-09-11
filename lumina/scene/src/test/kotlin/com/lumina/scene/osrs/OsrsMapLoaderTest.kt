@@ -8,7 +8,7 @@ import java.io.File
 class OsrsMapLoaderTest {
     @Test
     fun loadRegionReturnsFalseForMissingCache() {
-        val loader = OsrsMapLoader(SceneGraph())
+        val loader = OsrsMapLoader(SceneGraph(), XteaKeyService())
         val missingCache = File("/nonexistent/osrs/cache/path")
         assertFalse(loader.loadRegion(missingCache, 12850))
     }
