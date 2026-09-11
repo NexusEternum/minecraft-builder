@@ -8,7 +8,7 @@ import kotlin.math.sqrt
 object TemporalDenoiseMotion {
     const val POSITION_EPSILON = 0.05f
     const val FORWARD_EPSILON = 0.001f
-    const val MOTION_HISTORY_CAP = 8
+    const val MOTION_HISTORY_CAP = 16
 
     fun cameraMovedFactor(
         posX: Float, posY: Float, posZ: Float,

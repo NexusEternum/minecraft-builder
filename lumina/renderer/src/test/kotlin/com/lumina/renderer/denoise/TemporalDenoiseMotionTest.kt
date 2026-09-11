@@ -28,7 +28,7 @@ class TemporalDenoiseMotionTest {
 
     @Test
     fun effectiveHistoryCapLimitsBlendUnderMotion() {
-        assertEquals(8, TemporalDenoiseMotion.effectiveHistoryCap(64, cameraMovedFactor = 1f))
+        assertEquals(16, TemporalDenoiseMotion.effectiveHistoryCap(64, cameraMovedFactor = 1f))
         assertEquals(64, TemporalDenoiseMotion.effectiveHistoryCap(64, cameraMovedFactor = 0f))
         assertEquals(3, TemporalDenoiseMotion.effectiveHistoryCap(3, cameraMovedFactor = 1f))
     }

@@ -116,6 +116,8 @@ class OsrsMapLoader @Inject constructor(
                 val overlayManager = OverlayManager(store)
                 overlayManager.load()
 
+                val textureColors = OsrsTextureColorCache.build(store)
+
                 val objectManager = ObjectManager(store)
                 objectManager.load()
 
@@ -173,6 +175,7 @@ class OsrsMapLoader @Inject constructor(
                         region,
                         underlayManager,
                         overlayManager,
+                        textureColors,
                         objectManager,
                         store,
                         regionId,
@@ -229,6 +232,7 @@ class OsrsMapLoader @Inject constructor(
         region: Region,
         underlayManager: UnderlayManager,
         overlayManager: OverlayManager,
+        textureColors: OsrsTextureColorCache,
         objectManager: ObjectManager,
         store: Store,
         regionId: Int,
@@ -269,6 +273,7 @@ class OsrsMapLoader @Inject constructor(
                         startY,
                         underlayManager,
                         overlayManager,
+                        textureColors,
                         regionId,
                         originBaseX,
                         originBaseY,
@@ -316,6 +321,7 @@ class OsrsMapLoader @Inject constructor(
             region,
             objectManager,
             store,
+            textureColors,
             regionId,
             originBaseX,
             originBaseY,
@@ -372,6 +378,7 @@ class OsrsMapLoader @Inject constructor(
         region: Region,
         objectManager: ObjectManager,
         store: Store,
+        textureColors: OsrsTextureColorCache,
         regionId: Int,
         originBaseX: Int,
         originBaseY: Int,
@@ -434,7 +441,8 @@ class OsrsMapLoader @Inject constructor(
                         orientation,
                         objectDef.recolorToFind,
                         objectDef.recolorToReplace,
-                        objectDef.retextureToFind
+                        objectDef.retextureToFind,
+                        textureColors = textureColors
                     )
                     if (built.triangleCount == 0) {
                         skippedNoModel++
@@ -549,13 +557,14 @@ class OsrsMapLoader @Inject constructor(
         x: Int,
         y: Int,
         underlayManager: UnderlayManager,
-        overlayManager: OverlayManager
+        overlayManager: OverlayManager,
+        textureColors: OsrsTextureColorCache
     ): FloatArray {
         val overlayId = region.getOverlayId(plane, x, y)
         if (overlayId > 0) {
             val overlay = overlayManager.provide(overlayId)
             if (overlay != null) {
-                val rgb = overlayRgb(overlay)
+                val rgb = overlayRgb(overlay, textureColors)
                 if (rgb != null) return rgb
             }
         }
@@ -608,16 +617,20 @@ class OsrsMapLoader @Inject constructor(
         return Companion.shouldRenderUpperPlaneTile(overlayId, hasLocation)
     }
 
-    private fun overlayRgb(overlay: OverlayDefinition): FloatArray? {
+    private fun overlayRgb(overlay: OverlayDefinition, textureColors: OsrsTextureColorCache): FloatArray? {
         if (OsrsColorDecoder.isMagentaTextureMarker(overlay.rgbColor) ||
             OsrsColorDecoder.isMagentaTextureMarker(overlay.secondaryRgbColor)
         ) {
-            return TEXTURED_OVERLAY_FALLBACK
+            // Textured overlay (water, cobblestone, etc.) — use per-texture average when available.
+            if (overlay.texture >= 0) {
+                return textureColors.linearRgbOrFallback(overlay.texture)
+            }
+            return OsrsColorDecoder.texturedFallbackLinear()
         }
         OsrsColorDecoder.overlayRgb(overlay.rgbColor)?.let { return it }
         OsrsColorDecoder.overlayRgb(overlay.secondaryRgbColor)?.let { return it }
         if (overlay.texture >= 0) {
-            return TEXTURED_OVERLAY_FALLBACK
+            return textureColors.linearRgbOrFallback(overlay.texture)
         }
         return null
     }
@@ -629,6 +642,7 @@ class OsrsMapLoader @Inject constructor(
         startY: Int,
         underlayManager: UnderlayManager,
         overlayManager: OverlayManager,
+        textureColors: OsrsTextureColorCache,
         regionId: Int,
         originBaseX: Int,
         originBaseY: Int,
@@ -657,7 +671,7 @@ class OsrsMapLoader @Inject constructor(
                 }
 
                 val packedColor = packTileColorToUv(
-                    tileColor(region, plane, tileX, tileY, underlayManager, overlayManager)
+                    tileColor(region, plane, tileX, tileY, underlayManager, overlayManager, textureColors)
                 )
                 val baseVertex = vi
 
@@ -795,7 +809,6 @@ class OsrsMapLoader @Inject constructor(
         private const val FLOATS_PER_VERTEX = 8 // terrain vertices; object mesh layout is in OsrsObjectMeshBuilder
         /** Max placed object instances across the entire multi-region scene (not per region). */
         const val MAX_SCENE_OBJECTS = 12000
-        private val TEXTURED_OVERLAY_FALLBACK = OsrsColorDecoder.texturedFallbackLinear()
         private val TILE_CORNERS = arrayOf(
             intArrayOf(0, 0),
             intArrayOf(1, 0),

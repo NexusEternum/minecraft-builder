@@ -72,7 +72,8 @@ object OsrsObjectMeshBuilder {
         orientation: Int,
         recolorToFind: ShortArray? = null,
         recolorToReplace: ShortArray? = null,
-        retextureToFind: ShortArray? = null
+        retextureToFind: ShortArray? = null,
+        textureColors: OsrsTextureColorCache? = null
     ): MeshComponent {
         val vertexCount = model.vertexCount
         val faceCount = model.faceCount
@@ -134,12 +135,14 @@ object OsrsObjectMeshBuilder {
 
             val (nx, ny, nz) = computeFaceNormal(ax, ay, az, bx, by, bz, cx, cy, cz)
 
-            val hasTexture = (faceTextures != null &&
-                face < faceTextures.size &&
-                faceTextures[face].toInt() != -1) ||
-                isRetexturedFace(faceTextures, face, retextureToFind)
+            val textureId = if (faceTextures != null && face < faceTextures.size) {
+                faceTextures[face].toInt()
+            } else {
+                -1
+            }
+            val hasTexture = textureId != -1 || isRetexturedFace(faceTextures, face, retextureToFind)
             val rgb = if (hasTexture) {
-                OsrsColorDecoder.texturedFallbackLinear()
+                resolveTexturedFaceColor(textureId, textureColors)
             } else {
                 val rawHsl = if (faceColors != null && face < faceColors.size) faceColors[face].toInt() else 0
                 val hsl = applyRecolor(rawHsl, recolorToFind, recolorToReplace)
@@ -237,6 +240,16 @@ object OsrsObjectMeshBuilder {
             nz = 0f
         }
         return Triple(nx, ny, nz)
+    }
+
+    internal fun resolveTexturedFaceColor(
+        textureId: Int,
+        textureColors: OsrsTextureColorCache?
+    ): FloatArray {
+        if (textureId >= 0 && textureColors != null) {
+            return textureColors.linearRgbOrFallback(textureId)
+        }
+        return OsrsColorDecoder.texturedFallbackLinear()
     }
 
     private fun packTileColorToUv(color: FloatArray): Float {

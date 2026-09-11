@@ -100,6 +100,38 @@ class OsrsObjectMeshBuilderTest {
         assertEquals(fallback[2], rgb[2], 0.02f)
     }
 
+    @Test
+    fun texturedFaceUsesPerTextureAverageWhenProvided() {
+        val model = texturedTriangleModel(textureId = 7)
+        val greyLinear = floatArrayOf(0.5f, 0.5f, 0.5f)
+        val cache = textureCache(mapOf(7 to greyLinear))
+        val mesh = OsrsObjectMeshBuilder.modelDefinitionToMesh(
+            model,
+            orientation = 0,
+            textureColors = cache
+        )
+        val rgb = packedUvToLinearRgb(mesh.vertexData[6])
+        assertEquals(greyLinear[0], rgb[0], 0.02f)
+        assertEquals(greyLinear[1], rgb[1], 0.02f)
+        assertEquals(greyLinear[2], rgb[2], 0.02f)
+    }
+
+    @Test
+    fun resolveTexturedFaceColorFallsBackWhenTextureMissing() {
+        val cache = textureCache(emptyMap())
+        val fallback = OsrsColorDecoder.texturedFallbackLinear()
+        val rgb = OsrsObjectMeshBuilder.resolveTexturedFaceColor(12, cache)
+        assertEquals(fallback[0], rgb[0], 0.001f)
+        assertEquals(fallback[1], rgb[1], 0.001f)
+        assertEquals(fallback[2], rgb[2], 0.001f)
+    }
+
+    private fun textureCache(map: Map<Int, FloatArray>): OsrsTextureColorCache {
+        val ctor = OsrsTextureColorCache::class.java.getDeclaredConstructor(Map::class.java)
+        ctor.isAccessible = true
+        return ctor.newInstance(map) as OsrsTextureColorCache
+    }
+
     private fun triangleModel(faceHsl: Int): ModelDefinition {
         val def = ModelDefinition()
         def.vertexCount = 3

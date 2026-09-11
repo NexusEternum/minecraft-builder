@@ -138,6 +138,33 @@ object ComputePipelineFactory {
         }
     }
 
+    fun updateBufferBinding(
+        ctx: VulkanContext,
+        descriptorSet: Long,
+        binding: Int,
+        buffer: Long,
+        offset: Long,
+        range: Long,
+        type: Int = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+    ) {
+        val dev = ctx.device!!
+        MemoryStack.stackPush().use { stack ->
+            val bufInfo = VkDescriptorBufferInfo.calloc(1, stack)
+            bufInfo.get(0).buffer(buffer).offset(offset).range(range)
+
+            val write = VkWriteDescriptorSet.calloc(1, stack)
+            write.get(0)
+                .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                .dstSet(descriptorSet)
+                .dstBinding(binding)
+                .descriptorCount(1)
+                .descriptorType(type)
+                .pBufferInfo(bufInfo)
+
+            vkUpdateDescriptorSets(dev, write, null)
+        }
+    }
+
     fun updateImageBinding(ctx: VulkanContext, descriptorSet: Long, binding: Int, imageView: Long, type: Int) {
         val dev = ctx.device!!
         MemoryStack.stackPush().use { stack ->

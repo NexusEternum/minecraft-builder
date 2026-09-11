@@ -51,9 +51,10 @@ class SVGFDenoiser @Inject constructor(
             ComputePipelineFactory.BindingDesc(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // currentColor
             ComputePipelineFactory.BindingDesc(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // historyColor
             ComputePipelineFactory.BindingDesc(2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // normalDepth
-            ComputePipelineFactory.BindingDesc(3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // motionVectors
+            ComputePipelineFactory.BindingDesc(3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // motionVectors (FSR2)
             ComputePipelineFactory.BindingDesc(4, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // outputColor
             ComputePipelineFactory.BindingDesc(5, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // moments
+            ComputePipelineFactory.BindingDesc(6, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER), // camera / reprojection
         )
         temporalPipeline = ComputePipelineFactory.create(
             ctx, shaderCompiler, "/shaders/denoise/svgf_temporal.comp", bindings,
@@ -89,6 +90,18 @@ class SVGFDenoiser @Inject constructor(
         ComputePipelineFactory.updateImageBinding(ctx, temporal.descriptorSet, 3, rt.rtMotionVectors!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
         ComputePipelineFactory.updateImageBinding(ctx, temporal.descriptorSet, 4, rt.denoiseOutput!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
         ComputePipelineFactory.updateImageBinding(ctx, temporal.descriptorSet, 5, rt.denoiseMoments!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+
+        val cameraBuffer = rtPipeline.getCameraBuffer()
+        if (cameraBuffer != null) {
+            ComputePipelineFactory.updateBufferBinding(
+                ctx,
+                temporal.descriptorSet,
+                6,
+                cameraBuffer.buffer,
+                0,
+                cameraBuffer.size
+            )
+        }
 
         if (atrousDescriptorSetA == 0L) return
         val normalDepth = rt.rtNormalDepth!!.view
