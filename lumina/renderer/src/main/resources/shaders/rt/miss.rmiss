@@ -9,6 +9,8 @@ layout(location = 0) rayPayloadInEXT RayPayload {
     vec3 worldPos;
     uint seed;
     bool missed;
+    vec3 brdfWeight;
+    vec3 bounceDir;
 } payload;
 
 layout(binding = 4, set = 0, scalar) uniform CameraUBO {
@@ -55,4 +57,6 @@ void main() {
     payload.depth = 10000.0;
     payload.worldPos = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * 10000.0;
     payload.missed = true;
+    payload.brdfWeight = vec3(0.0);
+    payload.bounceDir = vec3(0.0);
 }

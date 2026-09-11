@@ -32,6 +32,8 @@ layout(location = 0) rayPayloadInEXT RayPayload {
     vec3 worldPos;
     uint seed;
     bool missed;
+    vec3 brdfWeight;
+    vec3 bounceDir;
 } payload;
 
 layout(location = 1) rayPayloadEXT bool shadowed;
@@ -156,6 +158,8 @@ void main() {
         payload.depth = length(worldPos - gl_WorldRayOriginEXT);
         payload.worldPos = worldPos;
         payload.missed = false;
+        payload.brdfWeight = vec3(0.0);
+        payload.bounceDir = vec3(0.0);
         return;
     }
 
@@ -175,21 +179,18 @@ void main() {
         directLight = evaluatePBR(normal, V, sunDir, albedo, roughness, metallic) * sunColor;
     }
 
-    vec3 bounceDir;
     if (metallic > 0.5 || roughness < 0.3) {
-        bounceDir = sampleGGX(normal, roughness, payload.seed);
+        payload.bounceDir = sampleGGX(normal, roughness, payload.seed);
+        payload.brdfWeight = clamp(mix(vec3(0.04), albedo, metallic), 0.0, 1.0);
     } else {
-        bounceDir = cosineWeightedHemisphere(normal, payload.seed);
+        payload.bounceDir = cosineWeightedHemisphere(normal, payload.seed);
+        payload.brdfWeight = clamp(albedo * (1.0 - metallic), 0.0, 1.0);
     }
 
-    float rrProb = max(max(albedo.r, albedo.g), albedo.b);
-    if (randomFloat(payload.seed) < rrProb) {
-        // Future: recursive trace with bounceDir for global illumination
-    }
-
-    vec3 ambient = albedo * vec3(0.03, 0.04, 0.06);
+    vec3 ambient = albedo * vec3(0.01);
     payload.color = emissive + directLight + ambient;
     payload.normal = normal;
     payload.depth = length(worldPos - gl_WorldRayOriginEXT);
     payload.worldPos = worldPos;
+    payload.missed = false;
 }
