@@ -2,6 +2,7 @@ package com.lumina.renderer.overlay
 
 import com.lumina.renderer.LuminaRenderer
 import com.lumina.renderer.postfx.PostProcessStack
+import com.lumina.renderer.rt.RayTracingPipeline
 import com.lumina.renderer.upscale.UpscaleManager
 import com.lumina.renderer.upscale.UpscaleMode
 import com.lumina.renderer.vulkan.VulkanContext
@@ -14,13 +15,15 @@ import javax.inject.Singleton
 class OverlayRenderer @Inject constructor(
     private val ctx: VulkanContext,
     private val postProcess: PostProcessStack,
-    private val upscale: UpscaleManager
+    private val upscale: UpscaleManager,
+    private val rtPipeline: RayTracingPipeline
 ) {
     private val log = LoggerFactory.getLogger(OverlayRenderer::class.java)
 
     var showFps: Boolean = true
     var showDebugInfo: Boolean = false
     var showSettings: Boolean = false
+    var debugMode: Boolean = false
 
     private var fpsHistory = FloatArray(120)
     private var fpsIndex = 0
@@ -100,6 +103,11 @@ class OverlayRenderer @Inject constructor(
             GLFW_KEY_MINUS -> {
                 postProcess.exposure = (postProcess.exposure * 0.9f).coerceAtLeast(0.1f)
                 log.info("Exposure: {}", postProcess.exposure); true
+            }
+            GLFW_KEY_F11 -> {
+                debugMode = !debugMode
+                rtPipeline.maxBounces = if (debugMode) 0 else 4
+                log.info("Debug mode: {} (maxBounces={})", debugMode, rtPipeline.maxBounces); true
             }
             else -> false
         }

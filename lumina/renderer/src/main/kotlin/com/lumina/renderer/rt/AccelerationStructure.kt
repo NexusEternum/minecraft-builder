@@ -1,5 +1,6 @@
 package com.lumina.renderer.rt
 
+import com.lumina.renderer.vulkan.VulkanBuffer
 import com.lumina.renderer.vulkan.VulkanContext
 import com.lumina.renderer.vulkan.VulkanMemory
 import com.lumina.scene.graph.MeshComponent
@@ -11,6 +12,7 @@ import org.lwjgl.vulkan.*
 import org.lwjgl.vulkan.KHRAccelerationStructure.*
 import org.lwjgl.vulkan.KHRBufferDeviceAddress.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR
 import org.lwjgl.vulkan.KHRBufferDeviceAddress.vkGetBufferDeviceAddressKHR
+import org.lwjgl.vulkan.KHRAccelerationStructure.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR
 import org.lwjgl.vulkan.VK13.*
 import org.slf4j.LoggerFactory
 import java.nio.ByteBuffer
@@ -42,6 +44,35 @@ class AccelerationStructureManager @Inject constructor(
     private var instanceMemory: Long = 0
     private var scratchBuffer: Long = 0
     private var scratchMemory: Long = 0
+    private var scratchAlignment: Long = 128 // default, queried from device
+
+    fun queryScratchAlignment() {
+        if (!ctx.rtSupported || ctx.physicalDevice == null) return
+        MemoryStack.stackPush().use { stack ->
+            val asProps = VkPhysicalDeviceAccelerationStructurePropertiesKHR.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR)
+            val props2 = VkPhysicalDeviceProperties2.calloc(stack)
+                .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2)
+                .pNext(asProps)
+            vkGetPhysicalDeviceProperties2(ctx.physicalDevice!!, props2)
+            scratchAlignment = asProps.minAccelerationStructureScratchOffsetAlignment().toLong()
+            log.info("AS scratch alignment: {} bytes", scratchAlignment)
+        }
+    }
+
+    private fun createAlignedScratchBuffer(size: Long): VulkanBuffer {
+        val alignedSize = alignUp(size, scratchAlignment)
+        return VulkanMemory.createBuffer(
+            ctx, alignedSize,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT or VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+        )
+    }
+
+    private fun alignUp(value: Long, alignment: Long): Long {
+        if (alignment <= 1) return value
+        return (value + alignment - 1) and (alignment - 1).inv()
+    }
 
     fun buildBLAS(mesh: MeshComponent, vertexBuffer: Long, indexBuffer: Long, vertexOffset: Int, indexOffset: Int, indexTriBase: Int = 0, totalVertexCount: Int = 0): Int {
         if (!ctx.rtSupported) return -1
@@ -103,14 +134,8 @@ class AccelerationStructureManager @Inject constructor(
             check(vkCreateAccelerationStructureKHR(dev, asCreateInfo, null, pAS) == VK_SUCCESS)
             val accelStruct = pAS.get(0)
 
-            // Create scratch buffer
-            val scratch = VulkanMemory.createBuffer(
-                ctx, sizeInfo.buildScratchSize(),
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT or VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-            )
+            val scratch = createAlignedScratchBuffer(sizeInfo.buildScratchSize())
 
-            // Build
             buildInfo.dstAccelerationStructure(accelStruct)
             buildInfo.scratchData().deviceAddress(getBufferAddress(dev, scratch.buffer))
 
@@ -253,11 +278,7 @@ class AccelerationStructureManager @Inject constructor(
             tlasBuffer = tlasBuf.buffer
             tlasMemory = tlasBuf.memory
 
-            val scratch = VulkanMemory.createBuffer(
-                ctx, sizeInfo.buildScratchSize(),
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT or VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-            )
+            val scratch = createAlignedScratchBuffer(sizeInfo.buildScratchSize())
 
             buildInfo.dstAccelerationStructure(tlasAccelStruct)
             buildInfo.scratchData().deviceAddress(getBufferAddress(dev, scratch.buffer))

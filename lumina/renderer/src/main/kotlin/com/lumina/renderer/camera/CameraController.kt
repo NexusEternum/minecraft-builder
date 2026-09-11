@@ -67,7 +67,7 @@ class CameraController @Inject constructor(
         val dy = (ypos - lastMouseY) * lookSpeed
         lastMouseX = xpos; lastMouseY = ypos
 
-        yaw += dx.toFloat()
+        yaw -= dx.toFloat()
         pitch = (pitch - dy.toFloat()).coerceIn(-1.5f, 1.5f)
     }
 

@@ -5,10 +5,22 @@
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
 
+layout(binding = 4, set = 0, scalar) uniform CameraUBO {
+    mat4 viewInverse;
+    mat4 projInverse;
+    mat4 prevViewProj;
+    vec3 position;
+    float fov;
+    uint frameCount;
+    uint spp;
+    uint maxBounces;
+    float time;
+} camera;
+
 layout(binding = 5, set = 0, scalar) buffer VertexBuffer { float vertices[]; };
 layout(binding = 6, set = 0, scalar) buffer IndexBuffer { uint indices[]; };
 layout(binding = 7, set = 0, scalar) buffer MaterialBuffer {
-    vec4 materialData[]; // even indices: xyz=albedo, w=roughness; odd indices: xyz=emissive, w=metallic
+    vec4 materialData[];
 };
 
 hitAttributeEXT vec2 attribs;
@@ -135,7 +147,18 @@ void main() {
     vec3 emissive = materialData[matIdx * 2u + 1u].xyz;
     float metallic = materialData[matIdx * 2u + 1u].w;
 
-    // Direct lighting with shadow ray
+    // Debug mode: maxBounces==0 outputs flat albedo with simple directional light
+    if (camera.maxBounces == 0u) {
+        vec3 sunDir = normalize(vec3(0.5, 0.8, 0.3));
+        float NdotL = max(dot(normal, sunDir), 0.0);
+        payload.color = albedo * (0.15 + 0.85 * NdotL) + emissive;
+        payload.normal = normal;
+        payload.depth = length(worldPos - gl_WorldRayOriginEXT);
+        payload.worldPos = worldPos;
+        payload.missed = false;
+        return;
+    }
+
     vec3 sunDir = normalize(vec3(0.5, 0.8, 0.3));
     vec3 sunColor = vec3(1.4, 1.2, 1.0);
 
@@ -152,8 +175,6 @@ void main() {
         directLight = evaluatePBR(normal, V, sunDir, albedo, roughness, metallic) * sunColor;
     }
 
-    // Indirect bounce
-    vec3 indirectLight = vec3(0.0);
     vec3 bounceDir;
     if (metallic > 0.5 || roughness < 0.3) {
         bounceDir = sampleGGX(normal, roughness, payload.seed);
@@ -161,7 +182,6 @@ void main() {
         bounceDir = cosineWeightedHemisphere(normal, payload.seed);
     }
 
-    // Russian roulette — probability of continuing a bounce path
     float rrProb = max(max(albedo.r, albedo.g), albedo.b);
     if (randomFloat(payload.seed) < rrProb) {
         // Future: recursive trace with bounceDir for global illumination

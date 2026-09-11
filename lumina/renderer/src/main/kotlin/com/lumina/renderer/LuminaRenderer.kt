@@ -49,6 +49,7 @@ class LuminaRenderer @Inject constructor(
 
         renderTargets.init(upscale.renderWidth, upscale.renderHeight, width, height)
 
+        accelStructure.queryScratchAlignment()
         rtPipeline.init()
         denoiser.init(upscale.renderWidth, upscale.renderHeight)
         postProcess.init(upscale.renderWidth, upscale.renderHeight)
