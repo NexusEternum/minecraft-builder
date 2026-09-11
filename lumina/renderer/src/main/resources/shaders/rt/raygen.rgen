@@ -28,6 +28,7 @@ layout(location = 0) rayPayloadEXT RayPayload {
     bool missed;
     vec3 brdfWeight;
     vec3 bounceDir;
+    uint pathDepth;
 } payload;
 
 uint pcgHash(uint v) {
@@ -91,6 +92,7 @@ void main() {
             payload.color = vec3(0.0);
             payload.seed = seed;
             payload.missed = false;
+            payload.pathDepth = bounce;
 
             traceRayEXT(topLevelAS,
                 gl_RayFlagsOpaqueEXT,

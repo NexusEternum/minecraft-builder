@@ -37,6 +37,7 @@ layout(location = 0) rayPayloadInEXT RayPayload {
     bool missed;
     vec3 brdfWeight;
     vec3 bounceDir;
+    uint pathDepth;
 } payload;
 
 layout(location = 1) rayPayloadEXT bool shadowed;
@@ -65,6 +66,24 @@ uint pcgHash(uint v) {
 float randomFloat(inout uint seed) {
     seed = pcgHash(seed);
     return float(seed) / 4294967295.0;
+}
+
+// 1.5° half-angle: visible penumbras at OSRS scale (tile 2.56u, walls 2–4u tall)
+// without overly soft contact shadows. Solid-angle normalization folded into sunColor.
+const float SUN_HALF_ANGLE = 1.5 * 3.14159265 / 180.0;
+
+vec3 sampleSunDirection(vec3 sunCenter, inout uint seed) {
+    float r1 = randomFloat(seed);
+    float r2 = randomFloat(seed);
+    float cosTheta = mix(cos(SUN_HALF_ANGLE), 1.0, r1);
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    float phi = 2.0 * 3.14159265 * r2;
+
+    vec3 w = sunCenter;
+    vec3 u = normalize(cross(abs(w.x) > 0.1 ? vec3(0, 1, 0) : vec3(1, 0, 0), w));
+    vec3 v = cross(w, u);
+
+    return normalize(u * cos(phi) * sinTheta + v * sin(phi) * sinTheta + w * cosTheta);
 }
 
 vec3 cosineWeightedHemisphere(vec3 normal, inout uint seed) {
@@ -181,8 +200,9 @@ void main() {
         return;
     }
 
-    vec3 sunDir = normalize(vec3(0.65, 0.45, 0.4));
+    vec3 sunCenter = normalize(vec3(0.65, 0.45, 0.4));
     vec3 sunColor = vec3(3.0, 2.7, 2.2);
+    vec3 sunDir = sampleSunDirection(sunCenter, payload.seed);
 
     shadowed = true;
     traceRayEXT(topLevelAS,

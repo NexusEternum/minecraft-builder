@@ -11,6 +11,7 @@ layout(location = 0) rayPayloadInEXT RayPayload {
     bool missed;
     vec3 brdfWeight;
     vec3 bounceDir;
+    uint pathDepth;
 } payload;
 
 layout(binding = 4, set = 0, scalar) uniform CameraUBO {
@@ -26,7 +27,8 @@ layout(binding = 4, set = 0, scalar) uniform CameraUBO {
 } camera;
 
 // Hosek-Wilkie sky model approximation
-vec3 proceduralSky(vec3 dir) {
+// directMultiplier dims camera-visible sky; indirect rays use full strength for shadow fill.
+vec3 proceduralSky(vec3 dir, bool isIndirect) {
     float timeOfDay = camera.time;
     float sunAngle = timeOfDay * 3.14159265; // still used for sky gradient tint below
     vec3 sunDir = normalize(vec3(0.65, 0.45, 0.4));
@@ -48,11 +50,13 @@ vec3 proceduralSky(vec3 dir) {
         skyColor = mix(horizonColor * 0.4, horizonColor, exp(dir.y * 20.0));
     }
 
-    return (skyColor + sunGlow) * 0.6 + vec3(sunSize);
+    float directMultiplier = isIndirect ? 1.0 : 0.6;
+    return (skyColor + sunGlow) * directMultiplier + vec3(sunSize);
 }
 
 void main() {
-    payload.color = proceduralSky(gl_WorldRayDirectionEXT);
+    bool isIndirect = payload.pathDepth > 0u;
+    payload.color = proceduralSky(gl_WorldRayDirectionEXT, isIndirect);
     payload.normal = vec3(0.0);
     payload.depth = 10000.0;
     payload.worldPos = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * 10000.0;
