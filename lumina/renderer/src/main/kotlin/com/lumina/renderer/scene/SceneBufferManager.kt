@@ -40,33 +40,58 @@ class SceneBufferManager @Inject constructor(
      * A count mismatch means a partial/stale list — caller must not rebuild TLAS from it.
      */
     fun instancesForTlasRebuild(): List<SceneInstanceRecord>? {
-        val meshNodes = sceneGraph.nodesWithComponent(MeshComponent::class.java)
+        val renderableMeshNodes = renderableMeshNodes()
         val records = instanceRecords
         if (records.isEmpty()) {
-            if (meshNodes.isNotEmpty()) {
+            if (renderableMeshNodes.isNotEmpty()) {
                 log.error(
-                    "TLAS rebuild blocked: {} mesh nodes but instanceRecords empty (upload incomplete?)",
-                    meshNodes.size
+                    "TLAS rebuild blocked: {} renderable mesh nodes but instanceRecords empty (upload incomplete?)",
+                    renderableMeshNodes.size
                 )
             }
             return null
         }
-        if (records.size != meshNodes.size) {
+        if (records.size != renderableMeshNodes.size) {
             log.error(
-                "TLAS rebuild blocked: instanceRecords={} vs meshNodes={} — lists must match after upload",
+                "TLAS rebuild blocked: instanceRecords={} vs renderableMeshNodes={} — lists must match after upload",
                 records.size,
-                meshNodes.size
+                renderableMeshNodes.size
             )
             return null
         }
         return records
     }
 
+    private fun renderableMeshNodes(): List<SceneNode> =
+        sceneGraph.nodesWithComponent(MeshComponent::class.java).filter { node ->
+            val mesh = node.getComponent(MeshComponent::class.java)
+            mesh != null && mesh.isRenderable()
+        }
+
     fun uploadSceneData() {
         val uploadStartNs = System.nanoTime()
-        val meshNodes = sceneGraph.nodesWithComponent(MeshComponent::class.java)
-        if (meshNodes.isEmpty()) {
+        val allMeshNodes = sceneGraph.nodesWithComponent(MeshComponent::class.java)
+        if (allMeshNodes.isEmpty()) {
             log.warn("uploadSceneData: scene has no mesh nodes")
+            return
+        }
+
+        for (node in allMeshNodes) {
+            val mesh = node.getComponent(MeshComponent::class.java)
+            if (mesh != null && !mesh.isRenderable()) {
+                log.warn(
+                    "Skipping empty mesh node={} ({} tris, {} verts, {} indices)",
+                    node.name,
+                    mesh.triangleCount,
+                    mesh.vertexCount,
+                    mesh.indexData.size
+                )
+            }
+        }
+
+        val instanceNodes = renderableMeshNodes()
+        if (instanceNodes.isEmpty()) {
+            log.warn("uploadSceneData: scene has no renderable mesh nodes after filtering empties")
             return
         }
 
@@ -77,23 +102,23 @@ class SceneBufferManager @Inject constructor(
         accelStructure.clearBlasCache()
         val blasClearMs = (System.nanoTime() - blasClearStartNs) / 1_000_000
 
-        if (meshNodes.size >= INSTANCE_WARN_THRESHOLD) {
+        if (instanceNodes.size >= INSTANCE_WARN_THRESHOLD) {
             log.warn(
-                "Scene has {} mesh nodes (warn threshold {}); verify instancing dedup is working",
-                meshNodes.size,
+                "Scene has {} renderable mesh nodes (warn threshold {}); verify instancing dedup is working",
+                instanceNodes.size,
                 INSTANCE_WARN_THRESHOLD
             )
         }
-        if (meshNodes.size > MAX_TLAS_INSTANCES) {
+        if (instanceNodes.size > MAX_TLAS_INSTANCES) {
             log.error(
-                "Scene mesh node count {} exceeds MAX_TLAS_INSTANCES {}; truncating TLAS instances",
-                meshNodes.size,
+                "Scene renderable mesh node count {} exceeds MAX_TLAS_INSTANCES {}; truncating TLAS instances",
+                instanceNodes.size,
                 MAX_TLAS_INSTANCES
             )
         }
 
-        val instanceNodes = meshNodes.take(MAX_TLAS_INSTANCES)
-        val skippedInstances = meshNodes.size - instanceNodes.size
+        val cappedInstanceNodes = instanceNodes.take(MAX_TLAS_INSTANCES)
+        val skippedInstances = instanceNodes.size - cappedInstanceNodes.size
         if (skippedInstances > 0) {
             log.warn("Skipped {} scene nodes due to TLAS instance cap", skippedInstances)
         }
@@ -111,8 +136,12 @@ class SceneBufferManager @Inject constructor(
         var vertexOffset = 0
         var indexOffset = 0
 
-        for (node in instanceNodes) {
+        for (node in cappedInstanceNodes) {
             val mesh = node.getComponent(MeshComponent::class.java) ?: continue
+            if (!mesh.isRenderable()) {
+                log.warn("Skipping empty mesh during unique-mesh gather: node={}", node.name)
+                continue
+            }
             if (uniqueMeshes.containsKey(mesh)) continue
 
             uniqueMeshes[mesh] = UniqueMeshSlot(
@@ -129,7 +158,7 @@ class SceneBufferManager @Inject constructor(
 
         if (totalVertexFloats == 0) return
 
-        val instanceCount = instanceNodes.size
+        val instanceCount = cappedInstanceNodes.size
         val vertexSize = totalVertexFloats.toLong() * 4
         val indexSize = totalIndices.toLong() * 4
         val matSize = instanceCount.toLong() * 32
@@ -179,8 +208,12 @@ class SceneBufferManager @Inject constructor(
         )
         val pendingInstances = ArrayList<PendingInstance>(instanceCount)
         var instanceIdx = 0
-        for (node in instanceNodes) {
+        for (node in cappedInstanceNodes) {
             val mesh = node.getComponent(MeshComponent::class.java) ?: continue
+            if (!mesh.isRenderable()) {
+                log.warn("Skipping empty mesh during instance upload: node={}", node.name)
+                continue
+            }
             val mat = node.getComponent(MaterialComponent::class.java) ?: MaterialComponent()
             val transform = node.getComponent(Transform::class.java) ?: Transform()
             val slot = uniqueMeshes[mesh]

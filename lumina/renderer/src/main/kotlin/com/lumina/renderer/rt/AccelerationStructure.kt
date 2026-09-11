@@ -82,6 +82,15 @@ class AccelerationStructureManager @Inject constructor(
         totalVertexCount: Int = 0
     ): Int {
         if (!ctx.rtSupported) return -1
+        if (!mesh.isRenderable()) {
+            log.warn(
+                "Skipping BLAS build for empty mesh ({} tris, {} verts, {} indices)",
+                mesh.triangleCount,
+                mesh.vertexCount,
+                mesh.indexData.size
+            )
+            return -1
+        }
         blasCache[mesh]?.let { return it.handle }
 
         val dev = ctx.device!!

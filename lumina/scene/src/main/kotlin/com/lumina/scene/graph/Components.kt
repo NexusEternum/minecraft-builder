@@ -13,6 +13,10 @@ data class MeshComponent(
     val triangleCount: Int,
     var blasId: Int = -1
 ) {
+    /** True when the mesh has geometry suitable for GPU upload and BLAS build. */
+    fun isRenderable(): Boolean =
+        triangleCount > 0 && vertexCount > 0 && vertexData.isNotEmpty() && indexData.isNotEmpty()
+
     override fun equals(other: Any?) = this === other
     override fun hashCode() = System.identityHashCode(this)
 }

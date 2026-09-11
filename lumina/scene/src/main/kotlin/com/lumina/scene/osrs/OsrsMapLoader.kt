@@ -290,36 +290,25 @@ class OsrsMapLoader @Inject constructor(
                     val terrainMesh = chunkMeshes.terrain
                     val waterMesh = chunkMeshes.water
 
-                    if (terrainMesh.triangleCount > 0) {
-                        val node = sceneGraph.createNode("terrain_${regionId}_p${plane}_${chunkX}_${chunkY}")
-                        node.addComponent(Transform())
-                        node.addComponent(terrainMesh)
-                        node.addComponent(
-                            MaterialComponent(
-                                albedo = floatArrayOf(1f, 1f, 1f),
-                                roughness = 0.9f,
-                                metallic = 2.0f
-                            )
-                        )
-                        tileCount += terrainMesh.triangleCount / 2
-                        terrainTriangleCount += terrainMesh.triangleCount
-                        terrainMeshCount++
-                    }
-
-                    if (waterMesh.triangleCount > 0) {
-                        val waterNode = sceneGraph.createNode("water_${regionId}_p${plane}_${chunkX}_${chunkY}")
-                        waterNode.addComponent(Transform())
-                        waterNode.addComponent(waterMesh)
-                        waterNode.addComponent(
-                            MaterialComponent(
-                                albedo = OsrsWaterOverlay.ALBEDO_LINEAR.copyOf(),
-                                roughness = OsrsWaterOverlay.ROUGHNESS,
-                                metallic = OsrsWaterOverlay.METALLIC
-                            )
-                        )
-                        tileCount += waterMesh.triangleCount / 2
-                        terrainTriangleCount += waterMesh.triangleCount
-                        terrainMeshCount++
+                    placeChunkMeshNodes(
+                        sceneGraph,
+                        regionId,
+                        plane,
+                        chunkX,
+                        chunkY,
+                        terrainMesh,
+                        waterMesh
+                    ).let { (terrainPlaced, waterPlaced) ->
+                        if (terrainPlaced) {
+                            tileCount += terrainMesh.triangleCount / 2
+                            terrainTriangleCount += terrainMesh.triangleCount
+                            terrainMeshCount++
+                        }
+                        if (waterPlaced) {
+                            tileCount += waterMesh.triangleCount / 2
+                            terrainTriangleCount += waterMesh.triangleCount
+                            terrainMeshCount++
+                        }
                     }
                 }
             }
@@ -528,14 +517,16 @@ class OsrsMapLoader @Inject constructor(
                     metallic = 2.0f
                 )
 
-                val node = sceneGraph.createNode("obj_${location.id}_${localTileX}_${localTileY}_p${objectPlane}")
-                node.addComponent(transform)
-                node.addComponent(meshes.opaque)
-                node.addComponent(objectMaterial)
-                placed++
+                if (meshes.opaque.isRenderable()) {
+                    val node = sceneGraph.createNode("obj_${location.id}_${localTileX}_${localTileY}_p${objectPlane}")
+                    node.addComponent(transform)
+                    node.addComponent(meshes.opaque)
+                    node.addComponent(objectMaterial)
+                    placed++
+                }
 
                 val translucentMesh = meshes.translucent
-                if (translucentMesh != null && translucentMesh.triangleCount > 0) {
+                if (translucentMesh != null && translucentMesh.isRenderable()) {
                     val glassNode = sceneGraph.createNode(
                         "obj_${location.id}_${localTileX}_${localTileY}_p${objectPlane}_glass"
                     )
@@ -559,7 +550,7 @@ class OsrsMapLoader @Inject constructor(
                 }
 
                 val waterMesh = meshes.water
-                if (waterMesh != null && waterMesh.triangleCount > 0) {
+                if (waterMesh != null && waterMesh.isRenderable()) {
                     val waterNode = sceneGraph.createNode(
                         "obj_${location.id}_${localTileX}_${localTileY}_p${objectPlane}_water"
                     )
@@ -734,7 +725,7 @@ class OsrsMapLoader @Inject constructor(
         return OsrsWaterOverlay.classifyWaterTile(overlayId, overlay)
     }
 
-    private data class ChunkMeshResult(
+    internal data class ChunkMeshResult(
         val terrain: MeshComponent,
         val water: MeshComponent,
         val waterTiles: Int,
@@ -965,6 +956,76 @@ class OsrsMapLoader @Inject constructor(
             maxWorldY
         )
     }
+
+    internal fun placeChunkMeshNodes(
+        sceneGraph: SceneGraph,
+        regionId: Int,
+        plane: Int,
+        chunkX: Int,
+        chunkY: Int,
+        terrainMesh: MeshComponent,
+        waterMesh: MeshComponent
+    ): Pair<Boolean, Boolean> {
+        var terrainPlaced = false
+        var waterPlaced = false
+
+        if (terrainMesh.isRenderable()) {
+            val node = sceneGraph.createNode("terrain_${regionId}_p${plane}_${chunkX}_${chunkY}")
+            node.addComponent(Transform())
+            node.addComponent(terrainMesh)
+            node.addComponent(
+                MaterialComponent(
+                    albedo = floatArrayOf(1f, 1f, 1f),
+                    roughness = 0.9f,
+                    metallic = 2.0f
+                )
+            )
+            terrainPlaced = true
+        }
+
+        if (waterMesh.isRenderable()) {
+            val waterNode = sceneGraph.createNode("water_${regionId}_p${plane}_${chunkX}_${chunkY}")
+            waterNode.addComponent(Transform())
+            waterNode.addComponent(waterMesh)
+            waterNode.addComponent(
+                MaterialComponent(
+                    albedo = OsrsWaterOverlay.ALBEDO_LINEAR.copyOf(),
+                    roughness = OsrsWaterOverlay.ROUGHNESS,
+                    metallic = OsrsWaterOverlay.METALLIC
+                )
+            )
+            waterPlaced = true
+        }
+
+        return terrainPlaced to waterPlaced
+    }
+
+    /** @see buildChunkMeshes — exposed for unit tests that fabricate [Region] terrain. */
+    internal fun buildChunkMeshesForTest(
+        region: Region,
+        plane: Int,
+        startX: Int,
+        startY: Int,
+        underlayManager: UnderlayManager,
+        overlayManager: OverlayManager,
+        textureColors: OsrsTextureColorCache,
+        regionId: Int,
+        originBaseX: Int,
+        originBaseY: Int,
+        locationTiles: Set<Long> = emptySet()
+    ): ChunkMeshResult = buildChunkMeshes(
+        region,
+        plane,
+        startX,
+        startY,
+        underlayManager,
+        overlayManager,
+        textureColors,
+        regionId,
+        originBaseX,
+        originBaseY,
+        locationTiles
+    )
 
     companion object {
         const val TILE_SCALE = 2.56f

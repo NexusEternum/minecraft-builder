@@ -102,7 +102,8 @@ vec3 cosineWeightedHemisphere(vec3 normal, inout uint seed) {
 
 // GGX importance sampling of microfacet normal H (upper hemisphere around shading normal)
 vec3 sampleGGXNormal(vec3 normal, float roughness, inout uint seed) {
-    float a = roughness * roughness;
+    roughness = max(roughness, 0.04);
+    float a = max(roughness * roughness, 1.0e-4);
     float r1 = randomFloat(seed);
     float r2 = randomFloat(seed);
 
