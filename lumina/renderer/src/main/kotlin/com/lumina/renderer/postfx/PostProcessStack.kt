@@ -16,7 +16,7 @@ class PostProcessStack @Inject constructor(
 ) {
     private val log = LoggerFactory.getLogger(PostProcessStack::class.java)
 
-    var bloomEnabled: Boolean = true
+    var bloomEnabled: Boolean = false
     var bloomIntensity: Float = 0.04f
     var bloomThreshold: Float = 1.0f
     var bloomIterations: Int = 6

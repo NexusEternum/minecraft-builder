@@ -19,7 +19,8 @@ class SVGFDenoiser @Inject constructor(
     private var temporalPipeline: ComputePipelineBundle? = null
     private var atrousPipeline: ComputePipelineBundle? = null
 
-    var atrousIterations: Int = 5
+    // Static descriptor set: all A-Trous iterations read/write the same images, so only the last pass matters.
+    var atrousIterations: Int = 1
     var temporalAlpha: Float = 0.2f
     var momentAlpha: Float = 0.3f
     var sigmaLuminance: Float = 4.0f
@@ -56,8 +57,8 @@ class SVGFDenoiser @Inject constructor(
         val bindings = listOf(
             ComputePipelineFactory.BindingDesc(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // input
             ComputePipelineFactory.BindingDesc(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // normalDepth
-            ComputePipelineFactory.BindingDesc(2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // output
-            ComputePipelineFactory.BindingDesc(3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // moments (variance)
+            ComputePipelineFactory.BindingDesc(2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // moments (variance)
+            ComputePipelineFactory.BindingDesc(3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE), // output
         )
         atrousPipeline = ComputePipelineFactory.create(
             ctx, shaderCompiler, "/shaders/denoise/svgf_atrous.comp", bindings,
@@ -79,8 +80,8 @@ class SVGFDenoiser @Inject constructor(
         val atrous = atrousPipeline ?: return
         ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 0, rt.denoiseOutput!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
         ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 1, rt.rtNormalDepth!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-        ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 2, rt.bloomScratchA!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-        ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 3, rt.denoiseMoments!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 2, rt.denoiseMoments!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
+        ComputePipelineFactory.updateImageBinding(ctx, atrous.descriptorSet, 3, rt.bloomScratchA!!.view, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
     }
 
     fun recordCommands(cmdBuf: VkCommandBuffer) {

@@ -3,8 +3,8 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(binding = 0, rgba16f) uniform image2D sceneColor;
-layout(binding = 1, r32f) uniform image2D depthBuffer;
+layout(binding = 0, rgba32f) uniform image2D sceneColor;
+layout(binding = 1, rgba32f) uniform image2D depthBuffer;
 layout(binding = 2, rgba16f) uniform image2D outputImage;
 
 layout(push_constant, scalar) uniform Params {
@@ -36,7 +36,8 @@ void main() {
     if (coord.x >= size.x || coord.y >= size.y) return;
 
     vec4 color = imageLoad(sceneColor, coord);
-    float depth = imageLoad(depthBuffer, coord).r;
+    // rtNormalDepth packs normal in .xyz and depth in .w
+    float depth = imageLoad(depthBuffer, coord).w;
 
     // Volumetric fog raymarch
     vec2 uv = (vec2(coord) + 0.5) / vec2(size);

@@ -15,6 +15,7 @@ import org.lwjgl.system.MemoryStack
 import org.lwjgl.vulkan.KHRSwapchain.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
 import org.lwjgl.vulkan.VK13.*
 import org.lwjgl.vulkan.VkImageBlit
+import org.lwjgl.vulkan.VkImageCopy
 import org.lwjgl.vulkan.VkImageMemoryBarrier
 import org.slf4j.LoggerFactory
 import javax.inject.Inject
@@ -74,8 +75,14 @@ class LuminaRenderer @Inject constructor(
         val rtOutput = renderTargets.rtOutputColor ?: return
         val tonemapOut = renderTargets.tonemapOutput ?: return
 
-        // Wire tonemap to read directly from RT output
-        postProcess.updateTonemapDescriptors(rtOutput, tonemapOut)
+        if (vkContext.rtSupported) {
+            denoiser.updateDescriptors()
+            val bloomScratchA = renderTargets.bloomScratchA ?: return
+            val rtNormalDepth = renderTargets.rtNormalDepth ?: return
+            postProcess.updateDescriptors(bloomScratchA, rtNormalDepth, tonemapOut)
+        } else {
+            postProcess.updateTonemapDescriptors(rtOutput, tonemapOut)
+        }
     }
 
     fun renderFrame() {
@@ -99,9 +106,15 @@ class LuminaRenderer @Inject constructor(
         if (vkContext.rtSupported) {
             rtPipeline.recordCommands(cmdBuf, renderTargets.renderWidth, renderTargets.renderHeight)
             insertRTToComputeBarrier(cmdBuf)
-        }
 
-        postProcess.recordTonemapOnly(cmdBuf, vkContext.width, vkContext.height)
+            denoiser.recordCommands(cmdBuf)
+            RenderTargets.insertComputeBarrier(cmdBuf)
+            copyDenoiseHistory(cmdBuf)
+
+            postProcess.recordCommands(cmdBuf, renderTargets.renderWidth, renderTargets.renderHeight)
+        } else {
+            postProcess.recordTonemapOnly(cmdBuf, vkContext.width, vkContext.height)
+        }
 
         copyToSwapchain(cmdBuf, frameCtx.imageIndex)
 
@@ -113,6 +126,50 @@ class LuminaRenderer @Inject constructor(
                 frameCount, vkContext.rtSupported,
                 renderTargets.renderWidth, renderTargets.renderHeight,
                 vkContext.width, vkContext.height)
+        }
+    }
+
+    private fun copyDenoiseHistory(cmdBuf: org.lwjgl.vulkan.VkCommandBuffer) {
+        val output = renderTargets.denoiseOutput ?: return
+        val history = renderTargets.denoiseHistory ?: return
+
+        MemoryStack.stackPush().use { stack ->
+            val preBarrier = org.lwjgl.vulkan.VkMemoryBarrier.calloc(1, stack)
+            preBarrier.get(0)
+                .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+                .srcAccessMask(VK_ACCESS_SHADER_WRITE_BIT)
+                .dstAccessMask(VK_ACCESS_TRANSFER_READ_BIT)
+            vkCmdPipelineBarrier(cmdBuf,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0, preBarrier, null, null)
+
+            val copyRegion = VkImageCopy.calloc(1, stack)
+            copyRegion.get(0).srcSubresource()
+                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                .mipLevel(0).baseArrayLayer(0).layerCount(1)
+            copyRegion.get(0).srcOffset().set(0, 0, 0)
+            copyRegion.get(0).dstSubresource()
+                .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                .mipLevel(0).baseArrayLayer(0).layerCount(1)
+            copyRegion.get(0).dstOffset().set(0, 0, 0)
+            copyRegion.get(0).extent()
+                .width(output.width)
+                .height(output.height)
+                .depth(1)
+
+            vkCmdCopyImage(cmdBuf,
+                output.image, VK_IMAGE_LAYOUT_GENERAL,
+                history.image, VK_IMAGE_LAYOUT_GENERAL,
+                copyRegion)
+
+            val postBarrier = org.lwjgl.vulkan.VkMemoryBarrier.calloc(1, stack)
+            postBarrier.get(0)
+                .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+                .srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT)
+                .dstAccessMask(VK_ACCESS_SHADER_READ_BIT)
+            vkCmdPipelineBarrier(cmdBuf,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0, postBarrier, null, null)
         }
     }
 
