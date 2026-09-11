@@ -55,6 +55,7 @@ void main() {
 
         vec2 uv = (vec2(pixelCoord) + vec2(0.5) + vec2(jitterX, jitterY)) / vec2(launchSize);
         vec2 ndc = uv * 2.0 - 1.0;
+        ndc.y = -ndc.y;
 
         vec4 origin = camera.viewInverse * vec4(0, 0, 0, 1);
         vec4 target = camera.projInverse * vec4(ndc.x, ndc.y, 1, 1);
@@ -83,7 +84,7 @@ void main() {
         seed = payload.seed;
     }
 
-    accumulatedColor /= float(camera.spp);
+    accumulatedColor /= max(float(camera.spp), 1.0);
 
     imageStore(outputImage, pixelCoord, vec4(accumulatedColor, 1.0));
     imageStore(normalDepthImage, pixelCoord, vec4(firstNormal, firstDepth));

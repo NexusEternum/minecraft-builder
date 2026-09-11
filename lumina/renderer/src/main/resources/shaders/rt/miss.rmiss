@@ -1,5 +1,6 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_EXT_scalar_block_layout : require
 
 layout(location = 0) rayPayloadInEXT RayPayload {
     vec3 color;
@@ -10,7 +11,7 @@ layout(location = 0) rayPayloadInEXT RayPayload {
     bool missed;
 } payload;
 
-layout(binding = 4, set = 0) uniform CameraUBO {
+layout(binding = 4, set = 0, scalar) uniform CameraUBO {
     mat4 viewInverse;
     mat4 projInverse;
     mat4 prevViewProj;
