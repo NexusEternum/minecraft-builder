@@ -187,7 +187,7 @@ class OsrsMapLoader @Inject constructor(
                 val vi = localY * gridSize + localX
                 val off = vi * FLOATS_PER_VERTEX
 
-                val height = region.getTileHeight(plane, tileX, tileY)
+                val height = sampleHeight(region, plane, tileX, tileY)
                 verts[off] = tileX * TILE_SCALE
                 verts[off + 1] = -height / 128f * TILE_SCALE
                 verts[off + 2] = tileY * TILE_SCALE
@@ -237,8 +237,8 @@ class OsrsMapLoader @Inject constructor(
     }
 
     private fun sampleHeight(region: Region, plane: Int, x: Int, y: Int): Int {
-        val clampedX = x.coerceIn(0, REGION_SIZE)
-        val clampedY = y.coerceIn(0, REGION_SIZE)
+        val clampedX = x.coerceIn(0, REGION_SIZE - 1)
+        val clampedY = y.coerceIn(0, REGION_SIZE - 1)
         return region.getTileHeight(plane, clampedX, clampedY)
     }
 
