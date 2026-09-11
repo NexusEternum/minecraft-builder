@@ -10,10 +10,11 @@ import com.lumina.core.game.JagexLauncherIPC
 import com.lumina.plugin.*
 import com.lumina.renderer.LuminaRenderer
 import com.lumina.renderer.camera.CameraController
+import com.lumina.renderer.overlay.BUILD_STAMP
 import com.lumina.renderer.overlay.OverlayRenderer
 import com.lumina.renderer.scene.DemoScene
 import com.lumina.renderer.scene.SceneBufferManager
-import com.lumina.scene.graph.SceneGraph
+import com.lumina.scene.osrs.OsrsCoordinateMapper
 import com.lumina.scene.osrs.OsrsMapLoader
 import org.lwjgl.glfw.GLFW.*
 import org.lwjgl.glfw.GLFWCursorPosCallbackI
@@ -39,8 +40,25 @@ class LuminaClient(private val args: Array<String>) {
     private var newWidth = 0
     private var newHeight = 0
 
+    private var playMode = false
+    private var liveGameView: LiveGameView? = null
+    private var cameraSyncEnabled = true
+    private var sceneOriginBaseX = 0
+    private var sceneOriginBaseY = 0
+    private var loadedRegionsKey: String? = null
+    private var pendingRegionsKey: String? = null
+    private var pendingRegionsStablePolls = 0
+    private var upperPlaneLogged = false
+
     fun start() {
-        if (GameLauncher.launchIfRequested(args)) {
+        if ("--game" in args && "--play" !in args) {
+            if (GameLauncher.launchIfRequested(args)) {
+                return
+            }
+        }
+
+        if ("--play" in args) {
+            startPlayMode()
             return
         }
 
@@ -127,6 +145,172 @@ class LuminaClient(private val args: Array<String>) {
         mainLoop()
     }
 
+    private fun startPlayMode() {
+        playMode = true
+        log.info("Lumina --play live mirror mode starting (build {})", BUILD_STAMP)
+
+        liveGameView = GameLauncher.startPlaySession(args)
+        val loginSnapshot = waitForLogin(liveGameView!!)
+
+        val luminaDir = File(System.getProperty("user.home"), ".lumina")
+        luminaDir.mkdirs()
+        val runeliteDir = File(System.getProperty("user.home"), ".runelite")
+
+        injector = Guice.createInjector(LuminaModule(luminaDir, runeliteDir, args))
+
+        eventBus = injector.getInstance(EventBus::class.java)
+        renderer = injector.getInstance(LuminaRenderer::class.java)
+        camera = injector.getInstance(CameraController::class.java)
+        sceneBufferManager = injector.getInstance(SceneBufferManager::class.java)
+        overlay = injector.getInstance(OverlayRenderer::class.java)
+        osrsMapLoader = injector.getInstance(OsrsMapLoader::class.java)
+
+        camera.manualControlEnabled = false
+
+        renderer.init("Lumina LIVE - OSRS [build $BUILD_STAMP]", 1920, 1080)
+        setupCallbacks()
+
+        sceneOriginBaseX = loginSnapshot.baseX
+        sceneOriginBaseY = loginSnapshot.baseY
+        if (!reloadLiveScene(loginSnapshot)) {
+            log.error("--play: failed to load live scene regions; exiting")
+            System.exit(1)
+        }
+
+        syncCameraFromSnapshot(loginSnapshot)
+
+        printControls()
+        log.info("--play: mirror window open; camera sync enabled (F8 toggles free camera)")
+
+        running = true
+        mainLoop()
+    }
+
+    private fun waitForLogin(liveView: LiveGameView): LiveGameSnapshot {
+        var lastLogMs = 0L
+        var clientEverRan = false
+        while (true) {
+            if (liveView.isRunning()) {
+                clientEverRan = true
+            }
+
+            val snapshot = liveView.latestSnapshot()
+            if (snapshot?.loggedIn == true) {
+                log.info(
+                    "--play: logged in at base=({}, {}), {} regions loaded",
+                    snapshot.baseX,
+                    snapshot.baseY,
+                    snapshot.mapRegions.size
+                )
+                return snapshot
+            }
+
+            if (clientEverRan && !liveView.isRunning()) {
+                throw IllegalStateException("Embedded RuneLite client exited before login")
+            }
+
+            val now = System.currentTimeMillis()
+            if (now - lastLogMs >= 3000L) {
+                log.info("--play: waiting for login...")
+                lastLogMs = now
+            }
+            Thread.sleep(100)
+        }
+    }
+
+    private fun reloadLiveScene(snapshot: LiveGameSnapshot): Boolean {
+        if (snapshot.mapRegions.isEmpty()) {
+            log.warn("--play: no map regions reported by client")
+            return false
+        }
+
+        val cacheDir = resolveCacheDir()
+        log.info(
+            "--play: loading {} regions from {} with origin ({}, {})",
+            snapshot.mapRegions.size,
+            cacheDir.absolutePath,
+            snapshot.baseX,
+            snapshot.baseY
+        )
+
+        val loaded = osrsMapLoader.loadRegions(
+            cacheDir,
+            snapshot.mapRegions,
+            snapshot.baseX,
+            snapshot.baseY
+        )
+        if (!loaded) return false
+
+        sceneOriginBaseX = snapshot.baseX
+        sceneOriginBaseY = snapshot.baseY
+        loadedRegionsKey = OsrsCoordinateMapper.mapRegionsKey(snapshot.mapRegions)
+        pendingRegionsKey = null
+        pendingRegionsStablePolls = 0
+
+        sceneBufferManager.uploadSceneData()
+        return true
+    }
+
+    private fun syncCameraFromSnapshot(snapshot: LiveGameSnapshot) {
+        val luminaCamera = OsrsCoordinateMapper.cameraToLumina(
+            snapshot.cameraX,
+            snapshot.cameraY,
+            snapshot.cameraZ,
+            snapshot.cameraPitch,
+            snapshot.cameraYaw,
+            sceneOriginBaseX,
+            sceneOriginBaseY
+        )
+        camera.setPosition(luminaCamera.x, luminaCamera.y, luminaCamera.z)
+        camera.setRotation(luminaCamera.pitch, luminaCamera.yaw)
+    }
+
+    private fun handleLiveMirrorUpdate() {
+        val liveView = liveGameView ?: return
+        if (!liveView.isRunning()) {
+            log.warn("--play: embedded client exited; closing mirror window")
+            running = false
+            return
+        }
+
+        val snapshot = liveView.latestSnapshot() ?: return
+        if (!snapshot.loggedIn) return
+
+        if (snapshot.plane != 0 && !upperPlaneLogged) {
+            log.info("--play: player on plane {} — rendering ground plane 0 only for now", snapshot.plane)
+            upperPlaneLogged = true
+        }
+
+        maybeRebuildLiveScene(snapshot)
+
+        if (cameraSyncEnabled) {
+            syncCameraFromSnapshot(snapshot)
+        }
+    }
+
+    private fun maybeRebuildLiveScene(snapshot: LiveGameSnapshot) {
+        val regionsKey = OsrsCoordinateMapper.mapRegionsKey(snapshot.mapRegions)
+        if (regionsKey == loadedRegionsKey) {
+            pendingRegionsKey = null
+            pendingRegionsStablePolls = 0
+            return
+        }
+
+        if (regionsKey != pendingRegionsKey) {
+            pendingRegionsKey = regionsKey
+            pendingRegionsStablePolls = 1
+            return
+        }
+
+        pendingRegionsStablePolls++
+        if (pendingRegionsStablePolls < REGION_CHANGE_STABLE_POLLS) return
+
+        log.info("--play: map regions changed ({} -> {}), rebuilding scene", loadedRegionsKey, regionsKey)
+        if (reloadLiveScene(snapshot)) {
+            syncCameraFromSnapshot(snapshot)
+        }
+    }
+
     private fun parseOsrsRegionId(): Int {
         val index = args.indexOf("--osrs")
         if (index < 0) return -1
@@ -155,6 +339,8 @@ class LuminaClient(private val args: Array<String>) {
 
     companion object {
         private const val DEFAULT_OSRS_REGION_ID = 12850
+        /** Debounce region rebuild until the new set is stable for this many live polls. */
+        private const val REGION_CHANGE_STABLE_POLLS = 2
     }
 
     private fun printControls() {
@@ -168,7 +354,7 @@ class LuminaClient(private val args: Array<String>) {
         log.info("F5         - Toggle bloom")
         log.info("F6         - Toggle volumetric fog")
         log.info("F7         - Cycle tone mapping (AgX/ACES/Reinhard/None)")
-        log.info("F8         - Cycle upscale quality")
+        log.info("F8         - Cycle upscale quality (or toggle camera sync in --play)")
         log.info("F9         - Toggle raw path-traced output (skip denoiser/postfx)")
         log.info("+/-        - Adjust exposure")
         log.info("F11        - Toggle debug mode (flat albedo, no shadows)")
@@ -191,6 +377,14 @@ class LuminaClient(private val args: Array<String>) {
         })
 
         glfwSetKeyCallback(window, GLFWKeyCallbackI { win, key, _, action, _ ->
+            if (playMode && key == GLFW_KEY_F8 && action == GLFW_PRESS) {
+                cameraSyncEnabled = !cameraSyncEnabled
+                camera.manualControlEnabled = !cameraSyncEnabled
+                log.info("--play: camera sync {} (manual control {})",
+                    if (cameraSyncEnabled) "enabled" else "disabled",
+                    if (camera.manualControlEnabled) "enabled" else "disabled")
+                return@GLFWKeyCallbackI
+            }
             if (!overlay.handleKey(key, action)) {
                 if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
                     camera.toggleMouseCapture(win)
@@ -212,6 +406,9 @@ class LuminaClient(private val args: Array<String>) {
 
             try {
                 val deltaTime = (renderer.lastFrameTimeMs / 1000.0).toFloat().coerceIn(0.0001f, 0.1f)
+                if (playMode) {
+                    handleLiveMirrorUpdate()
+                }
                 camera.update(window, deltaTime,
                     renderer.upscale.getJitterX(), renderer.upscale.getJitterY())
 
@@ -244,5 +441,8 @@ class LuminaClient(private val args: Array<String>) {
         sceneBufferManager.destroy()
         renderer.destroy()
         log.info("Lumina client stopped")
+        if (playMode) {
+            System.exit(0)
+        }
     }
 }

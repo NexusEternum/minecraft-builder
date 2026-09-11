@@ -18,6 +18,9 @@ fun main(args: Array<String>) {
     if ("--game" in args) {
         log.info("Running embedded RuneLite game client (login screen via Jagex gamepack)")
     }
+    if ("--play" in args) {
+        log.info("Running --play live mirror (embedded game + path-traced window)")
+    }
     if ("--demo" in args) {
         log.info("Running in DEMO mode (no OSRS connection required)")
     }
@@ -43,6 +46,7 @@ private fun printHelp() {
         
         Options:
           --game              Boot the real OSRS client via embedded RuneLite (login screen)
+          --play              Boot game + path-traced LIVE mirror window (camera synced)
           --demo              Run with demo scene (no OSRS connection needed)
           --developer-mode    Enable developer mode and sideloaded plugins
           --jx_session_id ID  Jagex session ID (from Jagex Launcher)

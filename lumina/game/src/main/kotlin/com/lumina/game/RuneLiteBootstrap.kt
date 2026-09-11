@@ -34,6 +34,7 @@ class RuneLiteBootstrap {
     private fun buildRuneliteArgs(args: List<String>): List<String> {
         val filtered = args.filterNot { arg ->
             arg == "--game" ||
+                arg == "--play" ||
                 arg == "--demo" ||
                 arg == "--developer-mode" ||
                 arg == "--help" ||

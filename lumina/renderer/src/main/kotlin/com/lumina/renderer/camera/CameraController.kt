@@ -26,6 +26,9 @@ class CameraController @Inject constructor(
     var moveSpeed: Float = 50f
     var lookSpeed: Float = 0.003f
 
+    /** When false, WASD/mouse camera input is ignored (e.g. --play sync mode). */
+    var manualControlEnabled: Boolean = true
+
     private var lastMouseX: Double = 0.0
     private var lastMouseY: Double = 0.0
     private var firstMouse: Boolean = true
@@ -34,7 +37,9 @@ class CameraController @Inject constructor(
     private var frameIndex = 0L
 
     fun update(window: Long, deltaTime: Float, jitterX: Float = 0f, jitterY: Float = 0f) {
-        handleKeyboard(window, deltaTime)
+        if (manualControlEnabled) {
+            handleKeyboard(window, deltaTime)
+        }
         rtPipeline.updateCamera(x, y, z, pitch, yaw, fov, nearPlane, farPlane, jitterX, jitterY)
         if (frameIndex < 3) {
             log.info("Camera frame {}: pos=({}, {}, {}), pitch={}, yaw={}, fov={}",
@@ -59,7 +64,7 @@ class CameraController @Inject constructor(
     }
 
     fun handleMouseMove(xpos: Double, ypos: Double) {
-        if (!mouseCaptured) return
+        if (!manualControlEnabled || !mouseCaptured) return
         if (firstMouse) {
             lastMouseX = xpos; lastMouseY = ypos; firstMouse = false; return
         }

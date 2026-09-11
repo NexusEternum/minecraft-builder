@@ -36,11 +36,39 @@ class OsrsMapLoader @Inject constructor(
     var lastRegionCenterWorldZ: Float = 81f
         private set
 
+    /** Scene-local origin in world tile coords used by the last multi-region load. */
+    var sceneOriginBaseX: Int = 0
+        private set
+    var sceneOriginBaseY: Int = 0
+        private set
+
     fun loadRegion(cacheDir: File, regionId: Int): Boolean {
+        sceneOriginBaseX = 0
+        sceneOriginBaseY = 0
+        return loadRegions(cacheDir, intArrayOf(regionId), 0, 0)
+    }
+
+    /**
+     * Loads multiple OSRS regions into one scene using a scene-local origin.
+     * All geometry is positioned relative to ([originBaseX], [originBaseY]) in world tile coords.
+     */
+    fun loadRegions(
+        cacheDir: File,
+        regionIds: IntArray,
+        originBaseX: Int,
+        originBaseY: Int
+    ): Boolean {
+        if (regionIds.isEmpty()) {
+            log.warn("No region IDs supplied for multi-region load")
+            return false
+        }
         if (!cacheDir.isDirectory) {
             log.warn("OSRS cache directory not found: {}", cacheDir.absolutePath)
             return false
         }
+
+        sceneOriginBaseX = originBaseX
+        sceneOriginBaseY = originBaseY
 
         return try {
             Store(cacheDir).use { store ->
@@ -58,41 +86,93 @@ class OsrsMapLoader @Inject constructor(
                 val xteaKeyManager = xteaKeyService.buildKeyManager()
                 val regionLoader = RegionLoader(store, xteaKeyManager)
 
-                val mapDef = try {
-                    regionLoader.loadMapDef(regionId)
-                } catch (e: Exception) {
-                    log.warn("Map definition not found for region {}: {}", regionId, e.message)
+                sceneGraph.clear()
+                var loadedCount = 0
+                var totalTiles = 0
+                var totalTerrainMeshes = 0
+                var totalTerrainTriangles = 0
+                var totalObjects = 0
+
+                for (regionId in regionIds) {
+                    val mapDef = try {
+                        regionLoader.loadMapDef(regionId)
+                    } catch (e: Exception) {
+                        log.warn("Map definition not found for region {}: {}", regionId, e.message)
+                        continue
+                    }
+                    if (mapDef == null) {
+                        log.warn("Map definition not found for region {}", regionId)
+                        continue
+                    }
+
+                    val region = Region(regionId)
+                    region.loadTerrain(mapDef)
+
+                    val locDef = try {
+                        regionLoader.loadLocDef(regionId)
+                    } catch (e: Exception) {
+                        log.debug("Location definition unavailable for region {}: {}", regionId, e.message)
+                        null
+                    }
+                    if (locDef != null) {
+                        region.loadLocations(locDef)
+                    } else {
+                        log.warn("No object locations for region {} (missing XTEA keys or loc archive)", regionId)
+                    }
+
+                    val (offsetX, offsetZ) = OsrsCoordinateMapper.regionWorldOffset(regionId, originBaseX, originBaseY)
+                    val stats = buildScene(
+                        region,
+                        underlayManager,
+                        overlayManager,
+                        objectManager,
+                        store,
+                        regionId,
+                        offsetX,
+                        offsetZ,
+                        append = loadedCount > 0
+                    )
+                    loadedCount++
+                    totalTiles += stats.tileCount
+                    totalTerrainMeshes += stats.terrainMeshCount
+                    totalTerrainTriangles += stats.terrainTriangleCount
+                    totalObjects += stats.objectPlaced
+                }
+
+                if (loadedCount == 0) {
+                    log.warn("Failed to load any regions from {}", cacheDir.absolutePath)
                     return false
                 }
-                if (mapDef == null) {
-                    log.warn("Map definition not found for region {}", regionId)
-                    return false
-                }
 
-                val region = Region(regionId)
-                region.loadTerrain(mapDef)
+                lastRegionCenterWorldX = REGION_SIZE / 2f * TILE_SCALE
+                lastRegionCenterWorldY = 30f
+                lastRegionCenterWorldZ = REGION_SIZE / 2f * TILE_SCALE
 
-                val locDef = try {
-                    regionLoader.loadLocDef(regionId)
-                } catch (e: Exception) {
-                    log.debug("Location definition unavailable for region {}: {}", regionId, e.message)
-                    null
-                }
-                if (locDef != null) {
-                    region.loadLocations(locDef)
-                } else {
-                    log.warn("No object locations for region {} (missing XTEA keys or loc archive)", regionId)
-                }
-
-                buildScene(region, underlayManager, overlayManager, objectManager, store, regionId)
+                log.info(
+                    "Loaded {} OSRS regions at origin ({}, {}): {} tiles, {} terrain meshes, {} terrain triangles, {} objects",
+                    loadedCount,
+                    originBaseX,
+                    originBaseY,
+                    totalTiles,
+                    totalTerrainMeshes,
+                    totalTerrainTriangles,
+                    totalObjects
+                )
                 true
             }
         } catch (e: Exception) {
-            log.warn("Failed to load OSRS region {} from {}: {}", regionId, cacheDir.absolutePath, e.message)
-            log.debug("Region load failure details", e)
+            log.warn("Failed to load OSRS regions from {}: {}", cacheDir.absolutePath, e.message)
+            log.debug("Multi-region load failure details", e)
             false
         }
     }
+
+    private data class SceneBuildStats(
+        val tileCount: Int = 0,
+        val terrainMeshCount: Int = 0,
+        val terrainTriangleCount: Int = 0,
+        val objectPlaced: Int = 0
+    )
 
     private fun buildScene(
         region: Region,
@@ -100,9 +180,14 @@ class OsrsMapLoader @Inject constructor(
         overlayManager: OverlayManager,
         objectManager: ObjectManager,
         store: Store,
-        regionId: Int
-    ) {
-        sceneGraph.clear()
+        regionId: Int,
+        worldOffsetX: Float,
+        worldOffsetZ: Float,
+        append: Boolean
+    ): SceneBuildStats {
+        if (!append) {
+            sceneGraph.clear()
+        }
 
         val plane = 0
         var tileCount = 0
@@ -116,7 +201,8 @@ class OsrsMapLoader @Inject constructor(
 
                 val mesh = buildChunkMesh(
                     region, plane, startX, startY,
-                    underlayManager, overlayManager
+                    underlayManager, overlayManager,
+                    worldOffsetX, worldOffsetZ
                 )
                 if (mesh.triangleCount == 0) continue
 
@@ -137,19 +223,25 @@ class OsrsMapLoader @Inject constructor(
             }
         }
 
-        val centerTileX = REGION_SIZE / 2
-        val centerTileY = REGION_SIZE / 2
-        val centerHeight = -sampleHeight(region, plane, centerTileX, centerTileY) / 128f * TILE_SCALE
-        lastRegionCenterWorldX = centerTileX * TILE_SCALE
-        lastRegionCenterWorldY = centerHeight + 25f
-        lastRegionCenterWorldZ = centerTileY * TILE_SCALE
+        if (!append) {
+            val centerTileX = REGION_SIZE / 2
+            val centerTileY = REGION_SIZE / 2
+            val centerHeight = -sampleHeight(region, plane, centerTileX, centerTileY) / 128f * TILE_SCALE
+            lastRegionCenterWorldX = centerTileX * TILE_SCALE + worldOffsetX
+            lastRegionCenterWorldY = centerHeight + 25f
+            lastRegionCenterWorldZ = centerTileY * TILE_SCALE + worldOffsetZ
+        }
 
-        val objectStats = loadObjects(region, objectManager, store, regionId, plane)
+        val objectStats = loadObjects(
+            region, objectManager, store, regionId, plane, worldOffsetX, worldOffsetZ
+        )
 
         log.info(
-            "Loaded OSRS region {}: {} tiles, {} terrain meshes, {} terrain triangles, " +
+            "Loaded OSRS region {} at offset ({}, {}): {} tiles, {} terrain meshes, {} terrain triangles, " +
                 "{} objects placed (skipped-no-model={}, skipped-type={}, deduped={})",
             regionId,
+            worldOffsetX,
+            worldOffsetZ,
             tileCount,
             terrainMeshCount,
             terrainTriangleCount,
@@ -158,6 +250,8 @@ class OsrsMapLoader @Inject constructor(
             objectStats.skippedType,
             objectStats.dedupedMeshes
         )
+
+        return SceneBuildStats(tileCount, terrainMeshCount, terrainTriangleCount, objectStats.placed)
     }
 
     private data class ObjectLoadStats(
@@ -172,7 +266,9 @@ class OsrsMapLoader @Inject constructor(
         objectManager: ObjectManager,
         store: Store,
         regionId: Int,
-        plane: Int
+        plane: Int,
+        worldOffsetX: Float,
+        worldOffsetZ: Float
     ): ObjectLoadStats {
         val locations = region.locations ?: return ObjectLoadStats()
         val baseX = region.baseX
@@ -243,8 +339,8 @@ class OsrsMapLoader @Inject constructor(
                     continue
                 }
 
-                val worldX = localTileX * TILE_SCALE
-                val worldZ = localTileY * TILE_SCALE
+                val worldX = localTileX * TILE_SCALE + worldOffsetX
+                val worldZ = localTileY * TILE_SCALE + worldOffsetZ
                 val terrainY = -sampleHeight(region, plane, localTileX, localTileY) / 128f * TILE_SCALE
                 val offsetScale = MODEL_SCALE
                 val worldY = terrainY +
@@ -521,7 +617,9 @@ class OsrsMapLoader @Inject constructor(
         startX: Int,
         startY: Int,
         underlayManager: UnderlayManager,
-        overlayManager: OverlayManager
+        overlayManager: OverlayManager,
+        worldOffsetX: Float,
+        worldOffsetZ: Float
     ): MeshComponent {
         val tilesPerChunk = CHUNK_SIZE * CHUNK_SIZE
         val vertexCount = tilesPerChunk * 4
@@ -547,9 +645,9 @@ class OsrsMapLoader @Inject constructor(
                     val off = vi * FLOATS_PER_VERTEX
 
                     val height = sampleHeight(region, plane, cx, cy)
-                    verts[off] = cx * TILE_SCALE
+                    verts[off] = cx * TILE_SCALE + worldOffsetX
                     verts[off + 1] = -height / 128f * TILE_SCALE
-                    verts[off + 2] = cy * TILE_SCALE
+                    verts[off + 2] = cy * TILE_SCALE + worldOffsetZ
 
                     val normal = computeNormal(region, plane, cx, cy)
                     verts[off + 3] = normal[0]
