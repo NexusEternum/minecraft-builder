@@ -225,7 +225,9 @@ class OsrsMapLoader @Inject constructor(
         val tileCount: Int = 0,
         val terrainMeshCount: Int = 0,
         val terrainTriangleCount: Int = 0,
-        val objectPlaced: Int = 0
+        val objectPlaced: Int = 0,
+        val overlayWaterTiles: Int = 0,
+        val modelFaceWaterMeshes: Int = 0
     )
 
     private fun buildScene(
@@ -258,6 +260,7 @@ class OsrsMapLoader @Inject constructor(
         var tileCount = 0
         var terrainTriangleCount = 0
         var terrainMeshCount = 0
+        var overlayWaterTiles = 0
         val planeLimit = maxVisiblePlane + 1
 
         for (plane in 0 until planeLimit) {
@@ -266,7 +269,7 @@ class OsrsMapLoader @Inject constructor(
                     val startX = chunkX * CHUNK_SIZE
                     val startY = chunkY * CHUNK_SIZE
 
-                    val (terrainMesh, waterMesh) = buildChunkMeshes(
+                    val (terrainMesh, waterMesh, chunkWaterTiles) = buildChunkMeshes(
                         region,
                         plane,
                         startX,
@@ -279,6 +282,7 @@ class OsrsMapLoader @Inject constructor(
                         originBaseY,
                         locationTilesByPlane[plane]
                     )
+                    overlayWaterTiles += chunkWaterTiles
 
                     if (terrainMesh.triangleCount > 0) {
                         val node = sceneGraph.createNode("terrain_${regionId}_p${plane}_${chunkX}_${chunkY}")
@@ -346,21 +350,31 @@ class OsrsMapLoader @Inject constructor(
 
         log.info(
             "Loaded OSRS region {} at origin ({}, {}): {} tiles, {} terrain meshes, {} terrain triangles, " +
-                "{} objects placed (skipped-no-model={}, skipped-type={}, skipped-cap={}, deduped={})",
+                "{} overlay water tiles, {} objects placed (skipped-no-model={}, skipped-type={}, skipped-cap={}, " +
+                "deduped={}, model-face water meshes={})",
             regionId,
             originBaseX,
             originBaseY,
             tileCount,
             terrainMeshCount,
             terrainTriangleCount,
+            overlayWaterTiles,
             objectStats.placed,
             objectStats.skippedNoModel,
             objectStats.skippedType,
             objectStats.skippedCap,
-            objectStats.dedupedMeshes
+            objectStats.dedupedMeshes,
+            objectStats.modelFaceWaterMeshes
         )
 
-        return SceneBuildStats(tileCount, terrainMeshCount, terrainTriangleCount, objectStats.placed)
+        return SceneBuildStats(
+            tileCount,
+            terrainMeshCount,
+            terrainTriangleCount,
+            objectStats.placed,
+            overlayWaterTiles,
+            objectStats.modelFaceWaterMeshes
+        )
     }
 
     private data class ObjectLoadStats(
@@ -368,7 +382,8 @@ class OsrsMapLoader @Inject constructor(
         val skippedNoModel: Int = 0,
         val skippedType: Int = 0,
         val skippedCap: Int = 0,
-        val dedupedMeshes: Int = 0
+        val dedupedMeshes: Int = 0,
+        val modelFaceWaterMeshes: Int = 0
     )
 
     private var bridgeHandlingLogged = false
@@ -413,6 +428,7 @@ class OsrsMapLoader @Inject constructor(
         var skippedType = 0
         var skippedCap = 0
         var dedupedMeshes = 0
+        var modelFaceWaterMeshes = 0
 
         for (location in locations) {
             if (sceneObjectsPlaced + placed >= MAX_SCENE_OBJECTS) {
@@ -533,6 +549,30 @@ class OsrsMapLoader @Inject constructor(
                     )
                     placed++
                 }
+
+                val waterMesh = meshes.water
+                if (waterMesh != null && waterMesh.triangleCount > 0) {
+                    val waterNode = sceneGraph.createNode(
+                        "obj_${location.id}_${localTileX}_${localTileY}_p${objectPlane}_water"
+                    )
+                    waterNode.addComponent(
+                        Transform(
+                            x = transform.x,
+                            y = transform.y,
+                            z = transform.z
+                        )
+                    )
+                    waterNode.addComponent(waterMesh)
+                    waterNode.addComponent(
+                        MaterialComponent(
+                            albedo = OsrsWaterOverlay.ALBEDO_LINEAR.copyOf(),
+                            roughness = OsrsWaterOverlay.ROUGHNESS,
+                            metallic = OsrsWaterOverlay.METALLIC
+                        )
+                    )
+                    placed++
+                    modelFaceWaterMeshes++
+                }
             } catch (e: Exception) {
                 log.debug(
                     "Failed to place object {} type {} at {}: {}",
@@ -554,7 +594,7 @@ class OsrsMapLoader @Inject constructor(
             )
         }
 
-        return ObjectLoadStats(placed, skippedNoModel, skippedType, skippedCap, dedupedMeshes)
+        return ObjectLoadStats(placed, skippedNoModel, skippedType, skippedCap, dedupedMeshes, modelFaceWaterMeshes)
     }
 
     private fun loadModelDefinition(
@@ -699,7 +739,7 @@ class OsrsMapLoader @Inject constructor(
         originBaseX: Int,
         originBaseY: Int,
         locationTiles: Set<Long>
-    ): Pair<MeshComponent, MeshComponent> {
+    ): Triple<MeshComponent, MeshComponent, Int> {
         val tilesPerChunk = CHUNK_SIZE * CHUNK_SIZE
         val terrainVerts = FloatArray(tilesPerChunk * 4 * FLOATS_PER_VERTEX)
         val terrainIndices = IntArray(tilesPerChunk * 2 * 3)
@@ -811,7 +851,7 @@ class OsrsMapLoader @Inject constructor(
             )
         }
 
-        return terrainMesh to waterMesh
+        return Triple(terrainMesh, waterMesh, waterTiles)
     }
 
     private fun packTileColorToUv(color: FloatArray): Float {

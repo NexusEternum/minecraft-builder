@@ -154,6 +154,34 @@ class OsrsObjectMeshBuilderTest {
     }
 
     @Test
+    fun waterTexturedFaceSplitUsesWaterAlbedoAndSeparateSubMesh() {
+        val model = texturedTriangleModel(textureId = 1)
+        assertTrue(OsrsObjectMeshBuilder.isWaterTexturedFace(model.faceTextures, 0))
+
+        val meshes = OsrsObjectMeshBuilder.modelDefinitionToMeshes(model, orientation = 0)
+        assertEquals(0, meshes.opaque.triangleCount, "water face should not land in opaque mesh")
+        assertEquals(null, meshes.translucent)
+        assertEquals(1, meshes.water?.triangleCount)
+        assertEquals(3, meshes.water?.vertexCount)
+
+        val rgb = packedUvToLinearRgb(meshes.water!!.vertexData[6])
+        assertEquals(OsrsWaterOverlay.ALBEDO_LINEAR[0], rgb[0], 0.02f)
+        assertEquals(OsrsWaterOverlay.ALBEDO_LINEAR[1], rgb[1], 0.02f)
+        assertEquals(OsrsWaterOverlay.ALBEDO_LINEAR[2], rgb[2], 0.02f)
+    }
+
+    @Test
+    fun waterFaceTakesPriorityOverTranslucentTransparency() {
+        val model = texturedTriangleModel(textureId = 15)
+        model.faceTransparencies = byteArrayOf(128.toByte())
+
+        val meshes = OsrsObjectMeshBuilder.modelDefinitionToMeshes(model, orientation = 0)
+        assertEquals(0, meshes.opaque.triangleCount)
+        assertEquals(null, meshes.translucent)
+        assertEquals(1, meshes.water?.triangleCount)
+    }
+
+    @Test
     fun resolveTexturedFaceColorFallsBackWhenTextureMissing() {
         val cache = textureCache(emptyMap())
         val fallback = OsrsColorDecoder.texturedFallbackLinear()

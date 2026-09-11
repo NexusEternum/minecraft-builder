@@ -38,10 +38,13 @@ object OsrsObjectMeshBuilder {
 
     data class ObjectMeshBuildResult(
         val opaque: MeshComponent,
-        val translucent: MeshComponent? = null
+        val translucent: MeshComponent? = null,
+        val water: MeshComponent? = null
     ) {
         val hasGeometry: Boolean
-            get() = opaque.triangleCount > 0 || (translucent?.triangleCount ?: 0) > 0
+            get() = opaque.triangleCount > 0 ||
+                (translucent?.triangleCount ?: 0) > 0 ||
+                (water?.triangleCount ?: 0) > 0
     }
 
     /**
@@ -87,6 +90,14 @@ object OsrsObjectMeshBuilder {
             }
         }
         return hsl
+    }
+
+    /** True when [faceTextures][face] references an animated water sprite id. */
+    fun isWaterTexturedFace(faceTextures: ShortArray?, face: Int): Boolean {
+        if (faceTextures == null || face >= faceTextures.size) {
+            return false
+        }
+        return faceTextures[face].toInt() in OsrsWaterOverlay.WATER_TEXTURE_IDS
     }
 
     /** Faces whose texture id matches [retextureToFind] are treated as textured (fallback albedo). */
@@ -136,11 +147,16 @@ object OsrsObjectMeshBuilder {
 
         var opaqueFaces = 0
         var translucentFaces = 0
+        var waterFaces = 0
         for (face in 0 until faceCount) {
             when (classifyFaceTransparency(faceTransparencyAlpha(face, faceTransparencies))) {
-                FaceTransparencyClass.OPAQUE -> opaqueFaces++
-                FaceTransparencyClass.TRANSLUCENT -> translucentFaces++
                 FaceTransparencyClass.INVISIBLE -> Unit
+                else -> when {
+                    isWaterTexturedFace(faceTextures, face) -> waterFaces++
+                    classifyFaceTransparency(faceTransparencyAlpha(face, faceTransparencies)) ==
+                        FaceTransparencyClass.TRANSLUCENT -> translucentFaces++
+                    else -> opaqueFaces++
+                }
             }
         }
 
@@ -148,7 +164,8 @@ object OsrsObjectMeshBuilder {
             faceCount = faceCount,
             visibleFaces = opaqueFaces,
             includeFace = { face ->
-                classifyFaceTransparency(faceTransparencyAlpha(face, faceTransparencies)) ==
+                !isWaterTexturedFace(faceTextures, face) &&
+                    classifyFaceTransparency(faceTransparencyAlpha(face, faceTransparencies)) ==
                     FaceTransparencyClass.OPAQUE
             },
             idx1 = idx1,
@@ -170,7 +187,8 @@ object OsrsObjectMeshBuilder {
                 faceCount = faceCount,
                 visibleFaces = translucentFaces,
                 includeFace = { face ->
-                    classifyFaceTransparency(faceTransparencyAlpha(face, faceTransparencies)) ==
+                    !isWaterTexturedFace(faceTextures, face) &&
+                        classifyFaceTransparency(faceTransparencyAlpha(face, faceTransparencies)) ==
                         FaceTransparencyClass.TRANSLUCENT
                 },
                 idx1 = idx1,
@@ -190,7 +208,30 @@ object OsrsObjectMeshBuilder {
             null
         }
 
-        return ObjectMeshBuildResult(opaque, translucent)
+        val water = if (waterFaces > 0) {
+            buildFaceMesh(
+                faceCount = faceCount,
+                visibleFaces = waterFaces,
+                includeFace = { face -> isWaterTexturedFace(faceTextures, face) },
+                idx1 = idx1,
+                idx2 = idx2,
+                idx3 = idx3,
+                rotatedX = rotatedX,
+                rotatedY = rotatedY,
+                rotatedZ = rotatedZ,
+                faceColors = faceColors,
+                faceTextures = faceTextures,
+                recolorToFind = recolorToFind,
+                recolorToReplace = recolorToReplace,
+                retextureToFind = retextureToFind,
+                textureColors = textureColors,
+                fixedAlbedo = OsrsWaterOverlay.ALBEDO_LINEAR
+            )
+        } else {
+            null
+        }
+
+        return ObjectMeshBuildResult(opaque, translucent, water)
     }
 
     /** Back-compat helper for tests/callers that only need the opaque mesh. */
@@ -225,7 +266,8 @@ object OsrsObjectMeshBuilder {
         recolorToFind: ShortArray?,
         recolorToReplace: ShortArray?,
         retextureToFind: ShortArray?,
-        textureColors: OsrsTextureColorCache?
+        textureColors: OsrsTextureColorCache?,
+        fixedAlbedo: FloatArray? = null
     ): MeshComponent {
         if (visibleFaces == 0) {
             return MeshComponent(FloatArray(0), IntArray(0), 0, 0)
@@ -263,13 +305,17 @@ object OsrsObjectMeshBuilder {
             } else {
                 -1
             }
-            val hasTexture = textureId != -1 || isRetexturedFace(faceTextures, face, retextureToFind)
-            val rgb = if (hasTexture) {
-                resolveTexturedFaceColor(textureId, textureColors)
+            val rgb = if (fixedAlbedo != null) {
+                fixedAlbedo
             } else {
-                val rawHsl = if (faceColors != null && face < faceColors.size) faceColors[face].toInt() else 0
-                val hsl = applyRecolor(rawHsl, recolorToFind, recolorToReplace)
-                OsrsColorDecoder.hslToRgb(hsl)
+                val hasTexture = textureId != -1 || isRetexturedFace(faceTextures, face, retextureToFind)
+                if (hasTexture) {
+                    resolveTexturedFaceColor(textureId, textureColors)
+                } else {
+                    val rawHsl = if (faceColors != null && face < faceColors.size) faceColors[face].toInt() else 0
+                    val hsl = applyRecolor(rawHsl, recolorToFind, recolorToReplace)
+                    OsrsColorDecoder.hslToRgb(hsl)
+                }
             }
             val packedColor = packTileColorToUv(rgb)
 

@@ -100,8 +100,8 @@ vec3 cosineWeightedHemisphere(vec3 normal, inout uint seed) {
     return normalize(u * cos(phi) * sinTheta + v * sin(phi) * sinTheta + w * cosTheta);
 }
 
-// GGX importance sampling
-vec3 sampleGGX(vec3 normal, float roughness, inout uint seed) {
+// GGX importance sampling of microfacet normal H (upper hemisphere around shading normal)
+vec3 sampleGGXNormal(vec3 normal, float roughness, inout uint seed) {
     float a = roughness * roughness;
     float r1 = randomFloat(seed);
     float r2 = randomFloat(seed);
@@ -115,6 +115,27 @@ vec3 sampleGGX(vec3 normal, float roughness, inout uint seed) {
     vec3 v = cross(w, u);
 
     return normalize(u * cos(phi) * sinTheta + v * sin(phi) * sinTheta + w * cosTheta);
+}
+
+float luminance(vec3 c) {
+    return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+
+vec3 fresnelSchlick(vec3 F0, float NdotV) {
+    return F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
+}
+
+// Specular bounce: reflect view around GGX-sampled half-vector; resample if below horizon.
+vec3 sampleSpecularBounce(vec3 N, vec3 V, float roughness, inout uint seed) {
+    roughness = max(roughness, 0.04);
+    for (int attempt = 0; attempt < 4; attempt++) {
+        vec3 H = sampleGGXNormal(N, roughness, seed);
+        vec3 L = normalize(reflect(-V, H));
+        if (dot(N, L) > 0.0) {
+            return L;
+        }
+    }
+    return cosineWeightedHemisphere(N, seed);
 }
 
 // Cook-Torrance BRDF
@@ -236,12 +257,21 @@ void main() {
         }
     }
 
-    if (metallic > 0.5 || roughness < 0.3) {
-        payload.bounceDir = sampleGGX(normal, roughness, payload.seed);
-        payload.brdfWeight = clamp(mix(vec3(0.04), albedo, metallic), 0.0, 1.0);
+    roughness = max(roughness, 0.04);
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    float NdotV = max(dot(normal, V), 0.0);
+    vec3 F = fresnelSchlick(F0, NdotV);
+    float pSpec = clamp(luminance(F0) + (1.0 - roughness) * 0.5, 0.05, 0.9);
+    float pDiff = 1.0 - pSpec;
+
+    if (randomFloat(payload.seed) < pSpec) {
+        payload.bounceDir = sampleSpecularBounce(normal, V, roughness, payload.seed);
+        // Specular throughput: Fresnel (not albedo for dielectrics); unbiased via 1/pSpec.
+        payload.brdfWeight = min(max(F / pSpec, vec3(0.0)), vec3(4.0));
     } else {
         payload.bounceDir = cosineWeightedHemisphere(normal, payload.seed);
-        payload.brdfWeight = clamp(albedo * (1.0 - metallic), 0.0, 1.0);
+        // Diffuse throughput: albedo scaled by (1-metallic); unbiased via 1/pDiff.
+        payload.brdfWeight = min(max(albedo * (1.0 - metallic) / pDiff, vec3(0.0)), vec3(4.0));
     }
 
     vec3 ambient = albedo * vec3(0.01);
