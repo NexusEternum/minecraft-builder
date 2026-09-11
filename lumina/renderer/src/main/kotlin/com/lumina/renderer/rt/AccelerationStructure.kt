@@ -1,12 +1,10 @@
 package com.lumina.renderer.rt
 
+import com.lumina.renderer.scene.SceneInstanceRecord
 import com.lumina.renderer.vulkan.VulkanBuffer
 import com.lumina.renderer.vulkan.VulkanContext
 import com.lumina.renderer.vulkan.VulkanMemory
 import com.lumina.scene.graph.MeshComponent
-import com.lumina.scene.graph.SceneGraph
-import com.lumina.scene.graph.SceneNode
-import com.lumina.scene.graph.Transform
 import org.lwjgl.system.MemoryStack
 import org.lwjgl.system.MemoryUtil
 import org.lwjgl.vulkan.*
@@ -21,7 +19,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 data class BLASEntry(
-    val handle: Long,
+    val handle: Int,
     val accelerationStructure: Long,
     val buffer: Long,
     val memory: Long,
@@ -32,21 +30,15 @@ data class BLASEntry(
 
 @Singleton
 class AccelerationStructureManager @Inject constructor(
-    private val ctx: VulkanContext,
-    private val sceneGraph: SceneGraph
+    private val ctx: VulkanContext
 ) {
     private val log = LoggerFactory.getLogger(AccelerationStructureManager::class.java)
-    private val blasCache = mutableMapOf<Int, BLASEntry>()
-    private var expectedMeshNodeIds: List<Int> = emptyList()
-    private var tlasHandle: Long = 0
+    private val blasCache = mutableMapOf<MeshComponent, BLASEntry>()
+    private var nextBlasHandle = 1
     private var tlasAccelStruct: Long = 0
     private var tlasBuffer: Long = 0
     private var tlasMemory: Long = 0
-    private var instanceBuffer: Long = 0
-    private var instanceMemory: Long = 0
-    private var scratchBuffer: Long = 0
-    private var scratchMemory: Long = 0
-    private var scratchAlignment: Long = 128 // default, queried from device
+    private var scratchAlignment: Long = 128
 
     fun queryScratchAlignment() {
         if (!ctx.rtSupported || ctx.physicalDevice == null) return
@@ -76,18 +68,28 @@ class AccelerationStructureManager @Inject constructor(
         return (value + alignment - 1) and (alignment - 1).inv()
     }
 
-    fun buildBLAS(mesh: MeshComponent, vertexBuffer: Long, indexBuffer: Long, vertexOffset: Int, indexOffset: Int, indexTriBase: Int = 0, totalVertexCount: Int = 0): Int {
+    /**
+     * Builds or returns cached BLAS for [mesh]. Dedup key is mesh reference identity — multiple
+     * TLAS instances may share one BLAS with different transforms.
+     */
+    fun buildBLAS(
+        mesh: MeshComponent,
+        vertexBuffer: Long,
+        indexBuffer: Long,
+        vertexOffset: Int,
+        indexOffset: Int,
+        indexTriBase: Int = 0,
+        totalVertexCount: Int = 0
+    ): Int {
         if (!ctx.rtSupported) return -1
-        val hash = System.identityHashCode(mesh)
-        if (blasCache.containsKey(hash)) return hash
+        blasCache[mesh]?.let { return it.handle }
 
         val dev = ctx.device!!
         MemoryStack.stackPush().use { stack ->
-            // Geometry description
             val triangles = VkAccelerationStructureGeometryTrianglesDataKHR.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR)
                 .vertexFormat(VK_FORMAT_R32G32B32_SFLOAT)
-                .vertexStride(32) // 8 floats * 4 bytes
+                .vertexStride(32)
                 .maxVertex(if (totalVertexCount > 0) totalVertexCount - 1 else mesh.vertexCount - 1)
                 .indexType(VK_INDEX_TYPE_UINT32)
 
@@ -101,12 +103,13 @@ class AccelerationStructureManager @Inject constructor(
                 .flags(VK_GEOMETRY_OPAQUE_BIT_KHR)
             geometry.get(0).geometry().triangles(triangles)
 
-            // Query build sizes
             val buildInfo = VkAccelerationStructureBuildGeometryInfoKHR.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR)
                 .type(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR)
-                .flags(VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR or
-                       VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR)
+                .flags(
+                    VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR or
+                        VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR
+                )
                 .geometryCount(1)
                 .pGeometries(geometry)
 
@@ -118,14 +121,12 @@ class AccelerationStructureManager @Inject constructor(
                 buildInfo, stack.ints(mesh.triangleCount), sizeInfo
             )
 
-            // Create acceleration structure buffer
             val asBuffer = VulkanMemory.createBuffer(
                 ctx, sizeInfo.accelerationStructureSize(),
                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR or VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
             )
 
-            // Create the acceleration structure
             val asCreateInfo = VkAccelerationStructureCreateInfoKHR.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR)
                 .buffer(asBuffer.buffer)
@@ -151,78 +152,66 @@ class AccelerationStructureManager @Inject constructor(
             vkCmdBuildAccelerationStructuresKHR(cmdBuf, buildInfoBuf, stack.pointers(rangeInfo))
             endSingleTimeCommands(cmdBuf)
 
-            // Get device address
             val addrInfo = VkAccelerationStructureDeviceAddressInfoKHR.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR)
                 .accelerationStructure(accelStruct)
 
             val deviceAddr = vkGetAccelerationStructureDeviceAddressKHR(dev, addrInfo)
-
-            // Cleanup scratch
             VulkanMemory.destroyBuffer(ctx, scratch)
 
-            val entry = BLASEntry(hash.toLong(), accelStruct, asBuffer.buffer, asBuffer.memory, deviceAddr, mesh.triangleCount, indexTriBase)
-            blasCache[hash] = entry
-            mesh.blasId = hash
+            val handle = nextBlasHandle++
+            val entry = BLASEntry(handle, accelStruct, asBuffer.buffer, asBuffer.memory, deviceAddr, mesh.triangleCount, indexTriBase)
+            blasCache[mesh] = entry
+            mesh.blasId = handle
 
-            log.info("Built BLAS: {} triangles, {} bytes, indexTriBase={}", mesh.triangleCount, sizeInfo.accelerationStructureSize(), indexTriBase)
-            return hash
+            log.info(
+                "Built BLAS handle={}: {} triangles, indexTriBase={} ({} unique BLAS total)",
+                handle,
+                mesh.triangleCount,
+                indexTriBase,
+                blasCache.size
+            )
+            return handle
         }
     }
 
-    fun setExpectedMeshNodeOrder(nodeIds: List<Int>) {
-        expectedMeshNodeIds = nodeIds
-    }
-
-    fun rebuildTLAS() {
+    fun rebuildTLAS(instances: List<SceneInstanceRecord>) {
         if (!ctx.rtSupported) return
         val dev = ctx.device!!
+        if (instances.isEmpty()) {
+            log.warn("rebuildTLAS: no instance records (upload scene first?)")
+            return
+        }
 
-        val meshNodes = sceneGraph.nodesWithComponent(MeshComponent::class.java)
-        val currentNodeIds = meshNodes.map { it.id }
-        if (expectedMeshNodeIds.isNotEmpty() && currentNodeIds != expectedMeshNodeIds) {
+        if (instances.size >= com.lumina.renderer.scene.SceneBufferManager.INSTANCE_WARN_THRESHOLD) {
             log.warn(
-                "Mesh node order mismatch vs upload: upload={} current={} (names: upload=[{}] current=[{}])",
-                expectedMeshNodeIds, currentNodeIds,
-                expectedMeshNodeIds.joinToString { id -> sceneGraph.getNode(id)?.name ?: "?$id" },
-                meshNodes.joinToString { it.name }
+                "TLAS rebuilding {} instances (warn threshold {})",
+                instances.size,
+                com.lumina.renderer.scene.SceneBufferManager.INSTANCE_WARN_THRESHOLD
             )
         }
 
-        data class TlasInstance(val node: SceneNode, val blas: BLASEntry, val transform: Transform)
-        val instances = mutableListOf<TlasInstance>()
-
-        for ((meshIndex, node) in meshNodes.withIndex()) {
-            val mesh = node.getComponent(MeshComponent::class.java)
-            if (mesh == null) {
-                log.warn("TLAS skip: mesh[{}] node={} id={} — no MeshComponent (desyncs material index {})", meshIndex, node.name, node.id, meshIndex)
-                continue
-            }
-            val transform = node.getComponent(Transform::class.java) ?: Transform()
-            val blas = blasCache[mesh.blasId]
-            if (blas == null) {
-                log.warn(
-                    "TLAS skip: mesh[{}] node={} id={} blasId=0x{} not in blasCache (desyncs material index {})",
-                    meshIndex, node.name, node.id, Integer.toHexString(mesh.blasId), meshIndex
-                )
-                continue
-            }
-            instances.add(TlasInstance(node, blas, transform))
-        }
-
-        if (instances.isEmpty()) return
-
         MemoryStack.stackPush().use { stack ->
-            // Create instance buffer
-            val instanceSize = 64L * instances.size // VkAccelerationStructureInstanceKHR = 64 bytes
+            val instanceSize = 64L * instances.size
             val instanceData = MemoryUtil.memAlloc(instanceSize.toInt())
 
-            for ((i, inst) in instances.withIndex()) {
-                val blas = inst.blas
-                val xform = inst.transform
-                val offset = i * 64
+            var built = 0
+            for (record in instances) {
+                val blas = blasCache.values.firstOrNull { it.handle == record.blasId }
+                if (blas == null) {
+                    log.warn(
+                        "TLAS skip instance[{}] {} — BLAS handle {} missing (stale upload?)",
+                        record.instanceIndex,
+                        record.nodeName,
+                        record.blasId
+                    )
+                    continue
+                }
 
-                // 3x4 row-major transform matrix
+                val i = built
+                val offset = i * 64
+                val xform = record.transform
+
                 instanceData.putFloat(offset + 0, xform.scaleX)
                 instanceData.putFloat(offset + 4, 0f)
                 instanceData.putFloat(offset + 8, 0f)
@@ -236,35 +225,42 @@ class AccelerationStructureManager @Inject constructor(
                 instanceData.putFloat(offset + 40, xform.scaleZ)
                 instanceData.putFloat(offset + 44, xform.z)
 
-                // instanceCustomIndex:24 = material/mesh index only (indexTriBase lives in SSBO binding 8)
-                val customIndex = i and 0xFFFFFF
+                // instanceCustomIndex indexes material[] and instanceInfo[] SSBOs (24-bit, no wrap)
+                val customIndex = record.instanceIndex
+                if (customIndex >= com.lumina.renderer.scene.SceneBufferManager.MAX_TLAS_INSTANCES) {
+                    log.error(
+                        "Instance index {} exceeds 24-bit customIndex limit; skipping {}",
+                        customIndex,
+                        record.nodeName
+                    )
+                    continue
+                }
                 instanceData.putInt(offset + 48, customIndex or (0xFF shl 24))
-                // instanceShaderBindingTableRecordOffset:24, flags:8
                 instanceData.putInt(offset + 52, 0)
-                // accelerationStructureReference
                 instanceData.putLong(offset + 56, blas.deviceAddress)
 
                 log.info(
-                    "tlas[{}] {} id={} blas=0x{} triBase={} customIndex={}",
-                    i, inst.node.name, inst.node.id,
-                    Integer.toHexString(inst.node.getComponent(MeshComponent::class.java)?.blasId ?: 0),
-                    blas.indexTriBase, customIndex
+                    "tlas[{}] instIdx={} {} blas={} triBase={}",
+                    i,
+                    customIndex,
+                    record.nodeName,
+                    record.blasId,
+                    record.indexTriBase
                 )
+                built++
             }
-            // NOTE: all writes above are absolute (indexed) puts which do NOT advance
-            // the buffer position, so flip() must NOT be called here — it would set
-            // limit=0 and uploadBuffer would copy nothing (empty TLAS, all rays miss).
+
+            if (built == 0) return
 
             val instBuf = VulkanMemory.createBuffer(
-                ctx, instanceSize,
+                ctx, 64L * built,
                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR or
-                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
+                    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
             )
             VulkanMemory.uploadBuffer(ctx, instBuf, instanceData)
             MemoryUtil.memFree(instanceData)
 
-            // TLAS geometry
             val instancesData = VkAccelerationStructureGeometryInstancesDataKHR.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR)
                 .arrayOfPointers(false)
@@ -288,10 +284,9 @@ class AccelerationStructureManager @Inject constructor(
 
             vkGetAccelerationStructureBuildSizesKHR(
                 dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-                buildInfo, stack.ints(instances.size), sizeInfo
+                buildInfo, stack.ints(built), sizeInfo
             )
 
-            // Destroy old TLAS
             if (tlasAccelStruct != 0L) {
                 vkDestroyAccelerationStructureKHR(dev, tlasAccelStruct, null)
                 vkDestroyBuffer(dev, tlasBuffer, null)
@@ -322,7 +317,7 @@ class AccelerationStructureManager @Inject constructor(
             buildInfo.scratchData().deviceAddress(getBufferAddress(dev, scratch.buffer))
 
             val rangeInfo = VkAccelerationStructureBuildRangeInfoKHR.calloc(1, stack)
-            rangeInfo.get(0).primitiveCount(instances.size)
+            rangeInfo.get(0).primitiveCount(built)
 
             val tlasBuildInfoBuf = VkAccelerationStructureBuildGeometryInfoKHR.calloc(1, stack)
             tlasBuildInfoBuf.put(0, buildInfo)
@@ -334,19 +329,17 @@ class AccelerationStructureManager @Inject constructor(
             VulkanMemory.destroyBuffer(ctx, scratch)
             VulkanMemory.destroyBuffer(ctx, instBuf)
 
-            log.info("Rebuilt TLAS: {} instances, AS handle={}", instances.size, tlasAccelStruct)
+            log.info("Rebuilt TLAS: {} instances, {} unique BLAS", built, blasCache.size)
         }
     }
 
     fun getTLASHandle(): Long = tlasAccelStruct
     fun getBLASCount(): Int = blasCache.size
 
-    fun getIndexTriBase(blasId: Int): Int = blasCache[blasId]?.indexTriBase ?: 0
-
-    /** Drop cached BLAS entries before rebuilding scene geometry (avoids stale GPU addresses). */
     fun clearBlasCache() {
         if (!ctx.rtSupported || blasCache.isEmpty()) {
             blasCache.clear()
+            nextBlasHandle = 1
             return
         }
         val dev = ctx.device!!
@@ -356,6 +349,7 @@ class AccelerationStructureManager @Inject constructor(
             vkFreeMemory(dev, entry.memory, null)
         }
         blasCache.clear()
+        nextBlasHandle = 1
     }
 
     private fun getBufferAddress(dev: VkDevice, buffer: Long): Long {

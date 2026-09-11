@@ -1,6 +1,5 @@
 package com.lumina.scene.osrs
 
-import com.lumina.scene.extract.OsrsSceneExtractor
 import com.lumina.scene.graph.MaterialComponent
 import com.lumina.scene.graph.MeshComponent
 import com.lumina.scene.graph.SceneGraph
@@ -98,6 +97,7 @@ class OsrsMapLoader @Inject constructor(
                 var totalTerrainMeshes = 0
                 var totalTerrainTriangles = 0
                 var totalObjects = 0
+                var sceneObjectsPlaced = 0
 
                 for (regionId in validRegionIds) {
                     val mapDef = try {
@@ -136,13 +136,15 @@ class OsrsMapLoader @Inject constructor(
                         regionId,
                         offsetX,
                         offsetZ,
-                        append = loadedCount > 0
+                        append = loadedCount > 0,
+                        sceneObjectsPlaced = sceneObjectsPlaced
                     )
                     loadedCount++
                     totalTiles += stats.tileCount
                     totalTerrainMeshes += stats.terrainMeshCount
                     totalTerrainTriangles += stats.terrainTriangleCount
                     totalObjects += stats.objectPlaced
+                    sceneObjectsPlaced += stats.objectPlaced
                 }
 
                 if (loadedCount == 0) {
@@ -189,7 +191,8 @@ class OsrsMapLoader @Inject constructor(
         regionId: Int,
         worldOffsetX: Float,
         worldOffsetZ: Float,
-        append: Boolean
+        append: Boolean,
+        sceneObjectsPlaced: Int = 0
     ): SceneBuildStats {
         if (!append) {
             sceneGraph.clear()
@@ -235,11 +238,11 @@ class OsrsMapLoader @Inject constructor(
             val centerHeight = -sampleHeight(region, plane, centerTileX, centerTileY) / 128f * TILE_SCALE
             lastRegionCenterWorldX = centerTileX * TILE_SCALE + worldOffsetX
             lastRegionCenterWorldY = centerHeight + 25f
-            lastRegionCenterWorldZ = centerTileY * TILE_SCALE + worldOffsetZ
+            lastRegionCenterWorldZ = worldOffsetZ - centerTileY * TILE_SCALE
         }
 
         val objectStats = loadObjects(
-            region, objectManager, store, regionId, plane, worldOffsetX, worldOffsetZ
+            region, objectManager, store, regionId, plane, worldOffsetX, worldOffsetZ, sceneObjectsPlaced
         )
 
         log.info(
@@ -274,7 +277,8 @@ class OsrsMapLoader @Inject constructor(
         regionId: Int,
         plane: Int,
         worldOffsetX: Float,
-        worldOffsetZ: Float
+        worldOffsetZ: Float,
+        sceneObjectsPlaced: Int
     ): ObjectLoadStats {
         val locations = region.locations ?: return ObjectLoadStats()
         val baseX = region.baseX
@@ -291,9 +295,14 @@ class OsrsMapLoader @Inject constructor(
         var capWarned = false
 
         for (location in locations) {
-            if (placed >= MAX_OBJECT_NODES) {
+            if (sceneObjectsPlaced + placed >= MAX_SCENE_OBJECTS) {
                 if (!capWarned) {
-                    log.warn("Object node cap ({}) reached for region {}", MAX_OBJECT_NODES, regionId)
+                    log.warn(
+                        "Scene object cap ({}) reached at region {} (placed={}, skipped remainder)",
+                        MAX_SCENE_OBJECTS,
+                        regionId,
+                        sceneObjectsPlaced + placed
+                    )
                     capWarned = true
                 }
                 break
@@ -348,7 +357,8 @@ class OsrsMapLoader @Inject constructor(
                 }
 
                 val worldX = localTileX * TILE_SCALE + worldOffsetX
-                val worldZ = localTileY * TILE_SCALE + worldOffsetZ
+                // Right-handed world: X=east, Y=up, Z=south → north is -Z (tile Y/north decreases Z).
+                val worldZ = worldOffsetZ - localTileY * TILE_SCALE
                 val terrainY = -sampleHeight(region, plane, localTileX, localTileY) / 128f * TILE_SCALE
                 val offsetScale = MODEL_SCALE
                 val worldY = terrainY +
@@ -363,7 +373,7 @@ class OsrsMapLoader @Inject constructor(
                         z = worldZ
                     )
                 )
-                node.addComponent(cloneMesh(mesh))
+                node.addComponent(mesh)
                 node.addComponent(
                     MaterialComponent(
                         albedo = floatArrayOf(1f, 1f, 1f),
@@ -428,26 +438,27 @@ class OsrsMapLoader @Inject constructor(
             val x = srcX[i]
             val y = srcY[i]
             val z = srcZ[i]
+            // OSRS object orientation is a Y-axis rotation; world Z is south (north = -Z), so negate Z.
             when (orientation and 3) {
                 0 -> {
                     rotatedX[i] = x
                     rotatedY[i] = y
-                    rotatedZ[i] = z
+                    rotatedZ[i] = -z
                 }
                 1 -> {
                     rotatedX[i] = z
                     rotatedY[i] = y
-                    rotatedZ[i] = -x
+                    rotatedZ[i] = x
                 }
                 2 -> {
                     rotatedX[i] = -x
                     rotatedY[i] = y
-                    rotatedZ[i] = -z
+                    rotatedZ[i] = z
                 }
                 else -> {
                     rotatedX[i] = -z
                     rotatedY[i] = y
-                    rotatedZ[i] = x
+                    rotatedZ[i] = -x
                 }
             }
         }
@@ -510,7 +521,7 @@ class OsrsMapLoader @Inject constructor(
             }
 
             val hsl = if (faceColors != null && face < faceColors.size) faceColors[face].toInt() else 0
-            val rgb = OsrsSceneExtractor.hslToRgb(hsl)
+            val rgb = OsrsColorDecoder.hslToRgb(hsl)
             val packedColor = packTileColorToUv(rgb)
 
             val cornerX = floatArrayOf(ax, bx, cx)
@@ -531,9 +542,10 @@ class OsrsMapLoader @Inject constructor(
                 vi++
             }
 
+            // Z-mirror flips winding; swap two corners to restore outward-facing normals.
             indices[ii++] = baseVertex
-            indices[ii++] = baseVertex + 1
             indices[ii++] = baseVertex + 2
+            indices[ii++] = baseVertex + 1
         }
 
         return MeshComponent(verts, indices, outVertexCount, visibleFaces)
@@ -598,7 +610,7 @@ class OsrsMapLoader @Inject constructor(
                 val underlayId = region.getUnderlayId(plane, sx, sy)
                 if (underlayId <= 0) continue
                 val underlay = underlayManager.provide(underlayId) ?: continue
-                val rgb = packedRgbToFloats(underlay.color)
+                val rgb = OsrsColorDecoder.underlayRgb(underlay.color)
                 rSum += rgb[0]
                 gSum += rgb[1]
                 bSum += rgb[2]
@@ -613,9 +625,11 @@ class OsrsMapLoader @Inject constructor(
     }
 
     private fun overlayRgb(overlay: OverlayDefinition): FloatArray? {
-        if (overlay.texture >= 0) return null
-        if (overlay.rgbColor != 0) return packedRgbToFloats(overlay.rgbColor)
-        if (overlay.secondaryRgbColor != 0) return packedRgbToFloats(overlay.secondaryRgbColor)
+        OsrsColorDecoder.overlayRgb(overlay.rgbColor)?.let { return it }
+        OsrsColorDecoder.overlayRgb(overlay.secondaryRgbColor)?.let { return it }
+        if (overlay.texture >= 0) {
+            return TEXTURED_OVERLAY_FALLBACK
+        }
         return null
     }
 
@@ -655,7 +669,7 @@ class OsrsMapLoader @Inject constructor(
                     val height = sampleHeight(region, plane, cx, cy)
                     verts[off] = cx * TILE_SCALE + worldOffsetX
                     verts[off + 1] = -height / 128f * TILE_SCALE
-                    verts[off + 2] = cy * TILE_SCALE + worldOffsetZ
+                    verts[off + 2] = worldOffsetZ - cy * TILE_SCALE
 
                     val normal = computeNormal(region, plane, cx, cy)
                     verts[off + 3] = normal[0]
@@ -668,20 +682,16 @@ class OsrsMapLoader @Inject constructor(
                 }
 
                 indices[ii++] = baseVertex
+                indices[ii++] = baseVertex + 2
                 indices[ii++] = baseVertex + 1
-                indices[ii++] = baseVertex + 2
                 indices[ii++] = baseVertex
-                indices[ii++] = baseVertex + 2
                 indices[ii++] = baseVertex + 3
+                indices[ii++] = baseVertex + 2
             }
         }
 
         return MeshComponent(verts, indices, vertexCount, triangleCount)
     }
-
-    /** Each scene node needs its own mesh so BLAS/index ranges are not shared via object dedup cache. */
-    private fun cloneMesh(mesh: MeshComponent): MeshComponent =
-        MeshComponent(mesh.vertexData.copyOf(), mesh.indexData.copyOf(), mesh.vertexCount, mesh.triangleCount)
 
     private fun packTileColorToUv(color: FloatArray): Float {
         val r = (color[0] * 255f).toInt().coerceIn(0, 255)
@@ -696,13 +706,18 @@ class OsrsMapLoader @Inject constructor(
         val hD = sampleHeight(region, plane, x, y - 1)
         val hU = sampleHeight(region, plane, x, y + 1)
 
-        val dx = (hR - hL) / (2f * 128f)
-        val dz = (hU - hD) / (2f * 128f)
-        val dy = 1f
-
-        val len = sqrt(dx * dx + dy * dy + dz * dz)
+        // pos = (x, -h, -y); ∂pos/∂x = (1, -∂h/∂x, 0), ∂pos/∂y_north = (0, -∂h/∂y, -1)
+        val dhdx = (hR - hL) / (2f * 128f)
+        val dhdy = (hU - hD) / (2f * 128f)
+        var nx = dhdx
+        var ny = 1f
+        var nz = dhdy
+        val len = sqrt(nx * nx + ny * ny + nz * nz)
         if (len <= 0f) return floatArrayOf(0f, 1f, 0f)
-        return floatArrayOf(-dx / len, dy / len, -dz / len)
+        nx /= len
+        ny /= len
+        nz /= len
+        return floatArrayOf(nx, ny, nz)
     }
 
     private fun sampleHeight(region: Region, plane: Int, x: Int, y: Int): Int {
@@ -718,7 +733,9 @@ class OsrsMapLoader @Inject constructor(
         private const val CHUNK_SIZE = 8
         private const val CHUNKS_PER_AXIS = REGION_SIZE / CHUNK_SIZE
         private const val FLOATS_PER_VERTEX = 8
-        private const val MAX_OBJECT_NODES = 1500
+        /** Max placed object instances across the entire multi-region scene (not per region). */
+        const val MAX_SCENE_OBJECTS = 12000
+        private val TEXTURED_OVERLAY_FALLBACK = floatArrayOf(0.35f, 0.42f, 0.28f)
         private val TILE_CORNERS = arrayOf(
             intArrayOf(0, 0),
             intArrayOf(1, 0),

@@ -119,7 +119,7 @@ class LuminaRenderer @Inject constructor(
         lastFrameNanos = now
 
         if (sceneGraph.dirty) {
-            accelStructure.rebuildTLAS()
+            accelStructure.rebuildTLAS(sceneBufferManager.instanceRecords)
             sceneGraph.clearDirty()
             descriptorsDirty = true
         }

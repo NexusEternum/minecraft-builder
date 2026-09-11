@@ -40,10 +40,19 @@ class CameraController @Inject constructor(
         if (manualControlEnabled) {
             handleKeyboard(window, deltaTime)
         }
-        rtPipeline.updateCamera(x, y, z, pitch, yaw, fov, nearPlane, farPlane, jitterX, jitterY)
+        if (useForwardVector) {
+            rtPipeline.updateCameraFromForward(
+                x, y, z, forwardX, forwardY, forwardZ,
+                fov, nearPlane, farPlane, jitterX, jitterY
+            )
+        } else {
+            rtPipeline.updateCamera(x, y, z, pitch, yaw, fov, nearPlane, farPlane, jitterX, jitterY)
+        }
         if (frameIndex < 3) {
-            log.info("Camera frame {}: pos=({}, {}, {}), pitch={}, yaw={}, fov={}",
-                frameIndex, x, y, z, pitch, yaw, fov)
+            log.info(
+                "Camera frame {}: pos=({}, {}, {}), forward=({}, {}, {}), pitch={}, yaw={}, fov={}",
+                frameIndex, x, y, z, forwardX, forwardY, forwardZ, pitch, yaw, fov
+            )
         }
         frameIndex++
     }
@@ -85,4 +94,22 @@ class CameraController @Inject constructor(
 
     fun setPosition(px: Float, py: Float, pz: Float) { x = px; y = py; z = pz }
     fun setRotation(p: Float, y: Float) { pitch = p; yaw = y }
+
+    /** Live mirror path: set camera from a world-space forward unit vector (OSRS-derived). */
+    fun setFromForwardVector(forwardX: Float, forwardY: Float, forwardZ: Float) {
+        useForwardVector = true
+        this.forwardX = forwardX
+        this.forwardY = forwardY
+        this.forwardZ = forwardZ
+    }
+
+    /** Demo/free camera path: yaw/pitch control (see [setRotation]). */
+    fun useYawPitchControl() {
+        useForwardVector = false
+    }
+
+    private var useForwardVector = false
+    private var forwardX = 0f
+    private var forwardY = 0f
+    private var forwardZ = -1f
 }

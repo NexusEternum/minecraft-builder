@@ -8,6 +8,7 @@ import com.lumina.scene.graph.MaterialComponent
 import com.lumina.scene.graph.MeshComponent
 import com.lumina.scene.graph.SceneGraph
 import com.lumina.scene.graph.SceneNode
+import com.lumina.scene.graph.Transform
 import org.lwjgl.system.MemoryUtil
 import org.lwjgl.vulkan.KHRAccelerationStructure.VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR
 import org.lwjgl.vulkan.KHRBufferDeviceAddress.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR
@@ -29,132 +30,201 @@ class SceneBufferManager @Inject constructor(
     var materialBuffer: VulkanBuffer? = null; private set
     var instanceInfoBuffer: VulkanBuffer? = null; private set
 
-    private var uploadedMeshCount = 0
+    /** TLAS instance records built during the last upload; indexed by [SceneInstanceRecord.instanceIndex]. */
+    var instanceRecords: List<SceneInstanceRecord> = emptyList()
+        private set
+
+    private var uploadedInstanceCount = 0
 
     fun uploadSceneData() {
         val meshNodes = sceneGraph.nodesWithComponent(MeshComponent::class.java)
         if (meshNodes.isEmpty()) return
 
+        destroyBuffers()
+        accelStructure.clearBlasCache()
+
+        if (meshNodes.size >= INSTANCE_WARN_THRESHOLD) {
+            log.warn(
+                "Scene has {} mesh nodes (warn threshold {}); verify instancing dedup is working",
+                meshNodes.size,
+                INSTANCE_WARN_THRESHOLD
+            )
+        }
+        if (meshNodes.size > MAX_TLAS_INSTANCES) {
+            log.error(
+                "Scene mesh node count {} exceeds MAX_TLAS_INSTANCES {}; truncating TLAS instances",
+                meshNodes.size,
+                MAX_TLAS_INSTANCES
+            )
+        }
+
+        val instanceNodes = meshNodes.take(MAX_TLAS_INSTANCES)
+        val skippedInstances = meshNodes.size - instanceNodes.size
+        if (skippedInstances > 0) {
+            log.warn("Skipped {} scene nodes due to TLAS instance cap", skippedInstances)
+        }
+
+        data class UniqueMeshSlot(
+            val mesh: MeshComponent,
+            val indexTriBase: Int,
+            val idxByteOffset: Int,
+            val vertexOffset: Int
+        )
+
+        val uniqueMeshes = LinkedHashMap<MeshComponent, UniqueMeshSlot>()
         var totalVertexFloats = 0
         var totalIndices = 0
-        for (node in meshNodes) {
+        var vertexOffset = 0
+        var indexOffset = 0
+
+        for (node in instanceNodes) {
             val mesh = node.getComponent(MeshComponent::class.java) ?: continue
+            if (uniqueMeshes.containsKey(mesh)) continue
+
+            uniqueMeshes[mesh] = UniqueMeshSlot(
+                mesh = mesh,
+                indexTriBase = indexOffset / 3,
+                idxByteOffset = indexOffset * 4,
+                vertexOffset = vertexOffset
+            )
             totalVertexFloats += mesh.vertexData.size
             totalIndices += mesh.indexData.size
+            vertexOffset += mesh.vertexData.size / FLOATS_PER_VERTEX
+            indexOffset += mesh.indexData.size
         }
 
         if (totalVertexFloats == 0) return
 
-        destroyBuffers()
-        accelStructure.clearBlasCache()
-
+        val instanceCount = instanceNodes.size
         val vertexSize = totalVertexFloats.toLong() * 4
         val indexSize = totalIndices.toLong() * 4
-        val matSize = meshNodes.size.toLong() * 32 // 8 floats (2 vec4s) per material
-        val instanceInfoSize = meshNodes.size.toLong() * 4 // one uint indexTriBase per mesh
+        val matSize = instanceCount.toLong() * 32
+        val instanceInfoSize = instanceCount.toLong() * 4
 
-        val vertBuf = VulkanMemory.createBuffer(ctx, vertexSize,
+        val vertBuf = VulkanMemory.createBuffer(
+            ctx, vertexSize,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT or VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR or
-                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-
-        val idxBuf = VulkanMemory.createBuffer(ctx, indexSize,
+                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        )
+        val idxBuf = VulkanMemory.createBuffer(
+            ctx, indexSize,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT or VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR or
-                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-
-        val matBuf = VulkanMemory.createBuffer(ctx, matSize,
+                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        )
+        val matBuf = VulkanMemory.createBuffer(
+            ctx, matSize,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
-
-        val instanceInfoBuf = VulkanMemory.createBuffer(ctx, instanceInfoSize,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        )
+        val instanceInfoBuf = VulkanMemory.createBuffer(
+            ctx, instanceInfoSize,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        )
 
         val vertData = MemoryUtil.memAlloc(vertexSize.toInt())
         val idxData = MemoryUtil.memAlloc(indexSize.toInt())
         val matData = MemoryUtil.memAlloc(matSize.toInt())
         val instanceInfoData = MemoryUtil.memAlloc(instanceInfoSize.toInt())
 
-        var vertexOffset = 0 // in vertices (not floats)
-        var indexOffset = 0  // in indices
-        var meshIdx = 0
+        var uploadVertexOffset = 0
+        for ((_, slot) in uniqueMeshes) {
+            val mesh = slot.mesh
+            for (f in mesh.vertexData) vertData.putFloat(f)
+            for (idx in mesh.indexData) idxData.putInt(idx + uploadVertexOffset)
+            uploadVertexOffset += mesh.vertexData.size / FLOATS_PER_VERTEX
+        }
 
-        data class MeshInfo(
+        data class PendingInstance(
             val node: SceneNode,
-            val mesh: MeshComponent,
-            val mat: MaterialComponent,
-            val idxByteOffset: Int,
-            val localIndexTriBase: Int,
-            val materialIndex: Int
+            val slot: UniqueMeshSlot,
+            val transform: Transform,
+            val instanceIndex: Int
         )
-        val meshInfos = mutableListOf<MeshInfo>()
-        val uploadNodeIds = mutableListOf<Int>()
-
-        for (node in meshNodes) {
+        val pendingInstances = ArrayList<PendingInstance>(instanceCount)
+        var instanceIdx = 0
+        for (node in instanceNodes) {
             val mesh = node.getComponent(MeshComponent::class.java) ?: continue
             val mat = node.getComponent(MaterialComponent::class.java) ?: MaterialComponent()
-
-            for (f in mesh.vertexData) vertData.putFloat(f)
-            // Global indices: offset by cumulative vertex count so they index into the combined buffer
-            for (idx in mesh.indexData) idxData.putInt(idx + vertexOffset)
+            val transform = node.getComponent(Transform::class.java) ?: Transform()
+            val slot = uniqueMeshes[mesh]
+            if (slot == null) {
+                log.warn("Instance {} node={} references mesh not in unique table; skipping", instanceIdx, node.name)
+                continue
+            }
 
             matData.putFloat(mat.albedo[0]).putFloat(mat.albedo[1]).putFloat(mat.albedo[2]).putFloat(mat.roughness)
             matData.putFloat(mat.emissive[0]).putFloat(mat.emissive[1]).putFloat(mat.emissive[2]).putFloat(mat.metallic)
-
-            val idxByteOffset = indexOffset * 4
-            val indexTriBase = indexOffset / 3
-            meshInfos.add(MeshInfo(node, mesh, mat, idxByteOffset, indexTriBase, meshIdx))
-            uploadNodeIds.add(node.id)
-
-            vertexOffset += mesh.vertexData.size / 8
-            indexOffset += mesh.indexData.size
-            meshIdx++
+            instanceInfoData.putInt(slot.indexTriBase)
+            pendingInstances.add(PendingInstance(node, slot, transform, instanceIdx))
+            instanceIdx++
         }
 
         vertData.flip()
         idxData.flip()
         matData.flip()
+        instanceInfoData.flip()
 
-        // Upload geometry and materials to GPU before building BLAS
         VulkanMemory.uploadBuffer(ctx, vertBuf, vertData)
         VulkanMemory.uploadBuffer(ctx, idxBuf, idxData)
         VulkanMemory.uploadBuffer(ctx, matBuf, matData)
+        VulkanMemory.uploadBuffer(ctx, instanceInfoBuf, instanceInfoData)
+
+        val records = ArrayList<SceneInstanceRecord>(pendingInstances.size)
+        for (pending in pendingInstances) {
+            val blasId = accelStructure.buildBLAS(
+                pending.slot.mesh,
+                vertBuf.buffer,
+                idxBuf.buffer,
+                0,
+                pending.slot.idxByteOffset,
+                pending.slot.indexTriBase,
+                uploadVertexOffset
+            )
+            if (blasId < 0) {
+                log.warn("BLAS build failed for instance {} node={}", pending.instanceIndex, pending.node.name)
+                continue
+            }
+            records.add(
+                SceneInstanceRecord(
+                    instanceIndex = pending.instanceIndex,
+                    blasId = blasId,
+                    indexTriBase = pending.slot.indexTriBase,
+                    transform = pending.transform,
+                    nodeName = pending.node.name
+                )
+            )
+            log.info(
+                "instance[{}] {} meshSlot triBase={} uniqueMeshes={} blas={}",
+                pending.instanceIndex,
+                pending.node.name,
+                pending.slot.indexTriBase,
+                uniqueMeshes.size,
+                blasId
+            )
+        }
 
         MemoryUtil.memFree(vertData)
         MemoryUtil.memFree(idxData)
         MemoryUtil.memFree(matData)
-
-        // Build BLAS after data is on the GPU
-        for (info in meshInfos) {
-            accelStructure.buildBLAS(info.mesh, vertBuf.buffer, idxBuf.buffer, 0, info.idxByteOffset, info.localIndexTriBase, vertexOffset)
-        }
-
-        accelStructure.setExpectedMeshNodeOrder(uploadNodeIds)
-
-        // Per-mesh indexTriBase for closest-hit shader (must match this mesh's slice in the combined index buffer)
-        for (info in meshInfos) {
-            instanceInfoData.putInt(info.localIndexTriBase)
-            log.info(
-                "mesh[{}] {} id={} albedo=({},{},{}) emissive=({},{},{}) rough={} metal={} blas=0x{} triBase={}",
-                info.materialIndex, info.node.name, info.node.id,
-                info.mat.albedo[0], info.mat.albedo[1], info.mat.albedo[2],
-                info.mat.emissive[0], info.mat.emissive[1], info.mat.emissive[2],
-                info.mat.roughness, info.mat.metallic,
-                Integer.toHexString(info.mesh.blasId), info.localIndexTriBase
-            )
-        }
-        instanceInfoData.flip()
-        VulkanMemory.uploadBuffer(ctx, instanceInfoBuf, instanceInfoData)
         MemoryUtil.memFree(instanceInfoData)
 
         vertexBuffer = vertBuf
         indexBuffer = idxBuf
         materialBuffer = matBuf
         instanceInfoBuffer = instanceInfoBuf
-        uploadedMeshCount = meshIdx
+        instanceRecords = records
+        uploadedInstanceCount = records.size
 
-        log.info("Uploaded scene: {} meshes, {} vertices, {} indices", meshIdx, vertexOffset, indexOffset)
+        log.info(
+            "Uploaded scene: {} TLAS instances, {} unique meshes, {} vertices, {} indices",
+            records.size,
+            uniqueMeshes.size,
+            uploadVertexOffset,
+            totalIndices
+        )
     }
 
     private fun destroyBuffers() {
@@ -162,11 +232,22 @@ class SceneBufferManager @Inject constructor(
         indexBuffer?.let { VulkanMemory.destroyBuffer(ctx, it) }
         materialBuffer?.let { VulkanMemory.destroyBuffer(ctx, it) }
         instanceInfoBuffer?.let { VulkanMemory.destroyBuffer(ctx, it) }
-        vertexBuffer = null; indexBuffer = null; materialBuffer = null; instanceInfoBuffer = null
+        vertexBuffer = null
+        indexBuffer = null
+        materialBuffer = null
+        instanceInfoBuffer = null
+        instanceRecords = emptyList()
     }
 
     fun destroy() {
         destroyBuffers()
         log.info("Scene buffer manager destroyed")
+    }
+
+    companion object {
+        private const val FLOATS_PER_VERTEX = 8
+        /** Vulkan instanceCustomIndex is 24-bit; never wrap — skip and log beyond this. */
+        const val MAX_TLAS_INSTANCES = 0xFFFFFF
+        const val INSTANCE_WARN_THRESHOLD = 8000
     }
 }

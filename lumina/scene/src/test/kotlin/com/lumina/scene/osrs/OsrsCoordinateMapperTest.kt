@@ -1,5 +1,6 @@
 package com.lumina.scene.osrs
 
+import net.runelite.cache.models.JagexColor
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -14,7 +15,6 @@ class OsrsCoordinateMapperTest {
         assertEquals(PI / 2, OsrsCoordinateMapper.jau14ToRadians(0x1000), 1e-6)
         assertEquals(PI, OsrsCoordinateMapper.jau14ToRadians(0x2000), 1e-6)
         assertEquals(PI * 1.5, OsrsCoordinateMapper.jau14ToRadians(0x3000), 1e-6)
-        // Mask wraps at 14 bits
         assertEquals(0.0, OsrsCoordinateMapper.jau14ToRadians(0x4000), 1e-9)
     }
 
@@ -27,7 +27,6 @@ class OsrsCoordinateMapperTest {
 
     @Test
     fun cameraPositionMapsLocalSceneUnitsToLuminaWorld() {
-        // Scene tile (10, 20) at height 640 local units with base == origin -> Lumina (25.6, -12.8, 51.2)
         val cam = OsrsCoordinateMapper.cameraToLumina(
             cameraX = 10 * 128,
             cameraY = 20 * 128,
@@ -40,13 +39,12 @@ class OsrsCoordinateMapperTest {
             originBaseY = 3200
         )
         assertEquals(10f * OsrsMapLoader.TILE_SCALE, cam.x, 0.001f)
-        assertEquals(20f * OsrsMapLoader.TILE_SCALE, cam.z, 0.001f)
+        assertEquals(-20f * OsrsMapLoader.TILE_SCALE, cam.z, 0.001f)
         assertEquals(-5f * OsrsMapLoader.TILE_SCALE, cam.y, 0.001f)
     }
 
     @Test
     fun cameraPositionAccountsForSceneBaseShift() {
-        // Scene scrolled east by 8 tiles: base moved +8 but local camera coords decreased; world pos unchanged.
         val atOrigin = OsrsCoordinateMapper.cameraToLumina(
             40 * 128, 20 * 128, 0, 0, 0,
             baseX = 3200, baseY = 3200, originBaseX = 3200, originBaseY = 3200
@@ -60,45 +58,58 @@ class OsrsCoordinateMapperTest {
     }
 
     @Test
-    fun cameraYawZeroFacesNorthPositiveZ() {
-        val (_, yaw) = OsrsCoordinateMapper.cameraAnglesToLumina(0, 0)
-        assertEquals(PI.toFloat(), yaw, 0.001f)
-        assertLookDirectionsMatch(0, 0)
+    fun osrsYawZeroForwardIsNorthMinusZ() {
+        val (fx, fy, fz) = OsrsCoordinateMapper.osrsForwardVectorLumina(0, 0)
+        assertEquals(0f, fx, 0.001f)
+        assertEquals(0f, fy, 0.001f)
+        assertEquals(-1f, fz, 0.001f)
     }
 
     @Test
-    fun cameraYawQuarterTurnFacesEastPositiveX() {
-        val (_, yaw) = OsrsCoordinateMapper.cameraAnglesToLumina(0, 0x1000)
-        assertEquals((PI / 2).toFloat(), yaw, 0.01f)
-        assertLookDirectionsMatch(0, 0x1000)
+    fun osrsYawQuarterTurnForwardIsEastPlusX() {
+        val (fx, fy, fz) = OsrsCoordinateMapper.osrsForwardVectorLumina(0, 0x1000)
+        assertEquals(1f, fx, 0.01f)
+        assertEquals(0f, fy, 0.01f)
+        assertEquals(0f, fz, 0.01f)
     }
 
     @Test
-    fun cameraPitchPositiveLooksDownPositiveLuminaPitch() {
-        val (pitch, _) = OsrsCoordinateMapper.cameraAnglesToLumina(0x400, 0)
-        assertTrue(pitch > 0f, "Expected downward OSRS pitch as positive Lumina pitch, got $pitch")
-        assertLookDirectionsMatch(0x400, 0)
+    fun osrsPitchPositiveLooksDown() {
+        val (_, fy, _) = OsrsCoordinateMapper.osrsForwardVectorLumina(0x400, 0)
+        assertTrue(fy < 0f, "Expected downward OSRS pitch as negative Lumina forward.y, got $fy")
     }
 
     @Test
-    fun cameraPitchDown45DegreesMatchesLuminaBasis() {
-        val (pitch, yaw) = OsrsCoordinateMapper.cameraAnglesToLumina(0x800, 0)
-        assertEquals((PI / 4).toFloat(), pitch, 0.01f)
-        assertEquals(PI.toFloat(), yaw, 0.01f)
-        assertLookDirectionsMatch(0x800, 0)
+    fun tileCenterNorthDecreasesZ() {
+        val (x0, _, z0) = OsrsCoordinateMapper.tileCenterLumina(10, 10, 0f, 0f)
+        val (_, _, z1) = OsrsCoordinateMapper.tileCenterLumina(10, 11, 0f, 0f)
+        assertEquals(10f * OsrsMapLoader.TILE_SCALE, x0, 0.001f)
+        assertTrue(z1 < z0, "Moving north (tileY+1) must decrease Lumina Z")
+        assertEquals(OsrsMapLoader.TILE_SCALE, z0 - z1, 0.001f)
     }
 
     @Test
-    fun regionWorldOffsetUsesSceneLocalOrigin() {
-        // Region 12850 -> base tiles (50*64, 50*64) = (3200, 3200)
+    fun regionWorldOffsetUsesSceneLocalOriginWithSouthPositiveZ() {
         val (ox, oz) = OsrsCoordinateMapper.regionWorldOffset(12850, 3200, 3200)
         assertEquals(0f, ox, 0.001f)
         assertEquals(0f, oz, 0.001f)
 
-        // Neighbour one region east: region 13106 -> (3264, 3200)
         val (eastX, eastZ) = OsrsCoordinateMapper.regionWorldOffset(13106, 3200, 3200)
         assertEquals(64f * OsrsMapLoader.TILE_SCALE, eastX, 0.001f)
         assertEquals(0f, eastZ, 0.001f)
+    }
+
+    @Test
+    fun viewInverseFromForwardNorthMatchesRayGenBasis() {
+        val view = OsrsCoordinateMapper.viewInverseFromForward(0f, 10f, 0f, 0f, 0f, -1f)
+        // Third column = camera-back = −forward = (0,0,1); camera forward = −Z = north
+        assertEquals(0f, view[8], 0.01f)
+        assertEquals(0f, view[9], 0.01f)
+        assertEquals(1f, view[10], 0.01f)
+        // First column = right = east
+        assertEquals(1f, view[0], 0.01f)
+        assertEquals(0f, view[1], 0.01f)
+        assertEquals(0f, view[2], 0.01f)
     }
 
     @Test
@@ -118,17 +129,5 @@ class OsrsCoordinateMapperTest {
         val a = intArrayOf(12850, 0, 12906, 12851)
         val b = intArrayOf(12906, 12851, 12850)
         assertEquals(OsrsCoordinateMapper.mapRegionsKey(a), OsrsCoordinateMapper.mapRegionsKey(b))
-    }
-
-    private fun assertLookDirectionsMatch(cameraPitch: Int, cameraYaw: Int) {
-        val (ox, oy, oz) = OsrsCoordinateMapper.osrsLookDirectionLumina(cameraPitch, cameraYaw)
-        val (pitch, yaw) = OsrsCoordinateMapper.cameraAnglesToLumina(cameraPitch, cameraYaw)
-        val (lx, ly, lz) = OsrsCoordinateMapper.luminaLookDirection(pitch, yaw)
-
-        val oLen = sqrt(ox * ox + oy * oy + oz * oz)
-        val lLen = sqrt(lx * lx + ly * ly + lz * lz)
-        assertEquals(ox / oLen, lx / lLen, 0.01f)
-        assertEquals(oy / oLen, ly / lLen, 0.01f)
-        assertEquals(oz / oLen, lz / lLen, 0.01f)
     }
 }

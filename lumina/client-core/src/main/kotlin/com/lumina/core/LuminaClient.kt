@@ -166,6 +166,7 @@ class LuminaClient(private val args: Array<String>) {
         osrsMapLoader = injector.getInstance(OsrsMapLoader::class.java)
 
         camera.manualControlEnabled = false
+        camera.useYawPitchControl()
 
         renderer.init("Lumina LIVE - OSRS [build $BUILD_STAMP]", 1920, 1080)
         setupCallbacks()
@@ -264,7 +265,7 @@ class LuminaClient(private val args: Array<String>) {
             sceneOriginBaseY
         )
         camera.setPosition(luminaCamera.x, luminaCamera.y, luminaCamera.z)
-        camera.setRotation(luminaCamera.pitch, luminaCamera.yaw)
+        camera.setFromForwardVector(luminaCamera.forwardX, luminaCamera.forwardY, luminaCamera.forwardZ)
     }
 
     private fun handleLiveMirrorUpdate() {
@@ -382,6 +383,11 @@ class LuminaClient(private val args: Array<String>) {
             if (playMode && key == GLFW_KEY_F8 && action == GLFW_PRESS) {
                 cameraSyncEnabled = !cameraSyncEnabled
                 camera.manualControlEnabled = !cameraSyncEnabled
+                if (cameraSyncEnabled) {
+                    liveGameView?.latestSnapshot()?.let { syncCameraFromSnapshot(it) }
+                } else {
+                    camera.useYawPitchControl()
+                }
                 log.info("--play: camera sync {} (manual control {})",
                     if (cameraSyncEnabled) "enabled" else "disabled",
                     if (camera.manualControlEnabled) "enabled" else "disabled")

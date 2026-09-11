@@ -417,6 +417,28 @@ class RayTracingPipeline @Inject constructor(
         nearPlane: Float, farPlane: Float,
         jitterX: Float = 0f, jitterY: Float = 0f
     ) {
+        val cp = kotlin.math.cos(pitch)
+        val sp = kotlin.math.sin(pitch)
+        val sy = kotlin.math.sin(yaw)
+        val cy = kotlin.math.cos(yaw)
+        updateCameraFromForward(
+            posX, posY, posZ,
+            cp * sy, -sp, -cp * cy,
+            fov, nearPlane, farPlane, jitterX, jitterY
+        )
+    }
+
+    /**
+     * Direct camera update from a world-space forward vector (used by --play live mirror).
+     * Bypasses yaw/pitch conventions entirely.
+     */
+    fun updateCameraFromForward(
+        posX: Float, posY: Float, posZ: Float,
+        forwardX: Float, forwardY: Float, forwardZ: Float,
+        fov: Float,
+        nearPlane: Float, farPlane: Float,
+        jitterX: Float = 0f, jitterY: Float = 0f
+    ) {
         val bufSize = 224L // 3 mat4(192) + vec3(12) + float(4) + 3 uint(12) + float(4) = 224
         if (cameraBuffer == null) {
             cameraBuffer = VulkanMemory.createBuffer(ctx, bufSize,
@@ -427,7 +449,7 @@ class RayTracingPipeline @Inject constructor(
         val aspect = ctx.width.toFloat() / ctx.height.toFloat().coerceAtLeast(1f)
         val fovRad = Math.toRadians(fov.toDouble()).toFloat()
 
-        val viewInv = computeViewInverse(posX, posY, posZ, pitch, yaw)
+        val viewInv = computeViewInverseFromForward(posX, posY, posZ, forwardX, forwardY, forwardZ)
         val projInv = computeProjInverse(fovRad, aspect, nearPlane, farPlane)
 
         val view = invertMat4(viewInv)
@@ -455,6 +477,45 @@ class RayTracingPipeline @Inject constructor(
 
         System.arraycopy(viewProj, 0, prevViewProj, 0, 16)
         frameCount++
+    }
+
+    private fun computeViewInverseFromForward(
+        px: Float, py: Float, pz: Float,
+        forwardX: Float, forwardY: Float, forwardZ: Float
+    ): FloatArray {
+        val len = kotlin.math.sqrt(forwardX * forwardX + forwardY * forwardY + forwardZ * forwardZ)
+        val fx = if (len > 1e-6f) forwardX / len else 0f
+        val fy = if (len > 1e-6f) forwardY / len else 0f
+        val fz = if (len > 1e-6f) forwardZ / len else -1f
+
+        val bx = -fx
+        val by = -fy
+        val bz = -fz
+
+        var rx = bz
+        var ry = 0f
+        var rz = -bx
+        val rLen = kotlin.math.sqrt(rx * rx + ry * ry + rz * rz)
+        if (rLen > 1e-6f) {
+            rx /= rLen
+            ry /= rLen
+            rz /= rLen
+        } else {
+            rx = 1f
+            ry = 0f
+            rz = 0f
+        }
+
+        val ux = by * rz - bz * ry
+        val uy = bz * rx - bx * rz
+        val uz = bx * ry - by * rx
+
+        return floatArrayOf(
+            rx, ry, rz, 0f,
+            ux, uy, uz, 0f,
+            bx, by, bz, 0f,
+            px, py, pz, 1f
+        )
     }
 
     private fun computeViewInverse(px: Float, py: Float, pz: Float, pitch: Float, yaw: Float): FloatArray {
