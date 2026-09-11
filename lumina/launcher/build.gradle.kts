@@ -13,6 +13,7 @@ application {
         "-XX:+DisableAttachMechanism",
         "-XX:CompileThreshold=1500",
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
+        "--add-opens", "java.base/java.util=ALL-UNNAMED",
         "--add-opens", "java.base/java.net=ALL-UNNAMED",
         "--add-opens", "java.base/java.io=ALL-UNNAMED",
         "-Dorg.lwjgl.util.DebugLoader=true",
