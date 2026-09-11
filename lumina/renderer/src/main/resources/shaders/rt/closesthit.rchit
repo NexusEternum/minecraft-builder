@@ -100,6 +100,7 @@ vec3 sampleGGX(vec3 normal, float roughness, inout uint seed) {
 
 // Cook-Torrance BRDF
 vec3 evaluatePBR(vec3 N, vec3 V, vec3 L, vec3 albedo, float roughness, float metallic) {
+    roughness = max(roughness, 0.08);
     vec3 H = normalize(V + L);
     float NdotL = max(dot(N, L), 0.0);
     float NdotV = max(dot(N, V), 0.0);
@@ -122,6 +123,7 @@ vec3 evaluatePBR(vec3 N, vec3 V, vec3 L, vec3 albedo, float roughness, float met
     float G = G1V * G1L;
 
     vec3 specular = (D * F * G) / max(4.0 * NdotV * NdotL, 0.001);
+    specular = min(specular, vec3(4.0));
     vec3 diffuse = (1.0 - F) * (1.0 - metallic) * albedo / 3.14159265;
 
     return (diffuse + specular) * NdotL;
@@ -179,6 +181,12 @@ void main() {
     vec3 directLight = vec3(0.0);
     if (!shadowed) {
         directLight = evaluatePBR(normal, V, sunDir, albedo, roughness, metallic) * sunColor;
+        directLight = min(directLight, vec3(6.0));
+        // Mirror-like surfaces get reflections from the traced bounce ray;
+        // fade out the analytic highlight to avoid double-counting and fireflies.
+        if (metallic > 0.5 && roughness < 0.15) {
+            directLight *= roughness / 0.15;
+        }
     }
 
     if (metallic > 0.5 || roughness < 0.3) {
