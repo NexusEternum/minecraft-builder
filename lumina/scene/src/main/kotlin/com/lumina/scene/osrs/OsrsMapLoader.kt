@@ -817,10 +817,16 @@ class OsrsMapLoader @Inject constructor(
                     verts[off + 1] = OsrsCoordinateMapper.luminaYFromHeightUnits128(height)
                     verts[off + 2] = luminaZ
 
-                    val normal = computeNormal(region, plane, cx, cy)
-                    verts[off + 3] = normal[0]
-                    verts[off + 4] = normal[1]
-                    verts[off + 5] = normal[2]
+                    if (water) {
+                        verts[off + 3] = 0f
+                        verts[off + 4] = 1f
+                        verts[off + 5] = 0f
+                    } else {
+                        val normal = computeNormal(region, plane, cx, cy)
+                        verts[off + 3] = normal[0]
+                        verts[off + 4] = normal[1]
+                        verts[off + 5] = normal[2]
+                    }
                     verts[off + 6] = packedColor
                     verts[off + 7] = 0f
 

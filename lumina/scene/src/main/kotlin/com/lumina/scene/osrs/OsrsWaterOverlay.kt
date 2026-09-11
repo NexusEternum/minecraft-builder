@@ -24,8 +24,8 @@ object OsrsWaterOverlay {
     /** Texture ids used by water overlays in flo.dat (secondary / legacy signal). */
     val WATER_TEXTURE_IDS: Set<Int> = setOf(1, 2, 15, 17, 24, 25)
 
-    /** Path-traced water albedo — deep blue-teal in linear space. */
-    val ALBEDO_LINEAR = floatArrayOf(0.02f, 0.08f, 0.12f)
+    /** Path-traced water albedo — brighter green-teal in linear space. */
+    val ALBEDO_LINEAR = floatArrayOf(0.04f, 0.12f, 0.16f)
 
     const val ROUGHNESS = 0.05f
     const val METALLIC = 0.0f
@@ -36,17 +36,24 @@ object OsrsWaterOverlay {
         val byTextureId: Boolean
     )
 
-    fun isWaterOverlayId(overlayId: Int): Boolean = overlayId in WATER_OVERLAY_IDS
+    /** True when [overlayDefinitionId] is a 117HD water overlay (flo definition id, not map-stored +1). */
+    fun isWaterOverlayId(overlayDefinitionId: Int): Boolean = overlayDefinitionId in WATER_OVERLAY_IDS
 
     fun isWaterOverlayByTexture(overlay: OverlayDefinition): Boolean =
         overlay.texture in WATER_TEXTURE_IDS
 
-    /** Classify a tile overlay as water by overlay id (primary) and/or texture id (secondary). */
-    fun classifyWaterTile(overlayId: Int, overlay: OverlayDefinition?): WaterTileClassification {
-        if (overlayId <= 0) {
+    /**
+     * Classify a tile overlay as water by overlay id (primary) and/or texture id (secondary).
+     *
+     * @param storedOverlayId Raw value from [net.runelite.cache.region.Region.getOverlayId] (definition id + 1;
+     *   0 means no overlay). The overlay-id check converts to definition space via [storedOverlayId] - 1 to
+     *   match [WATER_OVERLAY_IDS]. Texture ids on [overlay] are not offset.
+     */
+    fun classifyWaterTile(storedOverlayId: Int, overlay: OverlayDefinition?): WaterTileClassification {
+        if (storedOverlayId <= 0) {
             return WaterTileClassification(isWater = false, byOverlayId = false, byTextureId = false)
         }
-        val byOverlayId = isWaterOverlayId(overlayId)
+        val byOverlayId = isWaterOverlayId(storedOverlayId - 1)
         val byTextureId = overlay != null && isWaterOverlayByTexture(overlay)
         return WaterTileClassification(
             isWater = byOverlayId || byTextureId,

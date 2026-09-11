@@ -30,7 +30,7 @@ class OsrsWaterOverlayTest {
         }
         val stoneOverlay = OverlayDefinition()
         stoneOverlay.texture = 46
-        val classification = OsrsWaterOverlay.classifyWaterTile(overlayId = 999, overlay = stoneOverlay)
+        val classification = OsrsWaterOverlay.classifyWaterTile(storedOverlayId = 999, overlay = stoneOverlay)
         assertFalse(classification.isWater)
         assertFalse(classification.byOverlayId)
         assertFalse(classification.byTextureId)
@@ -38,17 +38,30 @@ class OsrsWaterOverlayTest {
 
     @Test
     fun overlayIdDetectionDoesNotRequireOverlayDefinition() {
-        val classification = OsrsWaterOverlay.classifyWaterTile(overlayId = 6, overlay = null)
+        // Stored overlay 7 = definition 6 (WATER_FLAT).
+        val classification = OsrsWaterOverlay.classifyWaterTile(storedOverlayId = 7, overlay = null)
         assertTrue(classification.isWater)
         assertTrue(classification.byOverlayId)
         assertFalse(classification.byTextureId)
     }
 
     @Test
+    fun storedOverlayIdSpaceMatchesColorPath() {
+        // Region.getOverlayId returns definition id + 1; WATER_OVERLAY_IDS is definition space.
+        val flatWater = OsrsWaterOverlay.classifyWaterTile(storedOverlayId = 7, overlay = null)
+        assertTrue(flatWater.isWater, "stored 7 (def 6, WATER_FLAT) must be water")
+        assertTrue(flatWater.byOverlayId)
+
+        val dirt = OsrsWaterOverlay.classifyWaterTile(storedOverlayId = 6, overlay = null)
+        assertFalse(dirt.isWater, "stored 6 (def 5, dirt) must not be water")
+        assertFalse(dirt.byOverlayId)
+    }
+
+    @Test
     fun textureIdIsSecondarySignalWhenOverlayIdUnknown() {
         val overlay = OverlayDefinition()
         overlay.texture = 1
-        val classification = OsrsWaterOverlay.classifyWaterTile(overlayId = 999, overlay = overlay)
+        val classification = OsrsWaterOverlay.classifyWaterTile(storedOverlayId = 999, overlay = overlay)
         assertTrue(classification.isWater)
         assertFalse(classification.byOverlayId)
         assertTrue(classification.byTextureId)
@@ -71,7 +84,7 @@ class OsrsWaterOverlayTest {
             metallic = OsrsWaterOverlay.METALLIC
         )
         assertFalse(material.metallic > 1.5f, "water must not use terrain vertex-color mode")
-        assertArrayEquals(floatArrayOf(0.02f, 0.08f, 0.12f), material.albedo, 0.001f)
+        assertArrayEquals(floatArrayOf(0.04f, 0.12f, 0.16f), material.albedo, 0.001f)
         assertEquals(0.05f, material.roughness, 0.001f)
     }
 
