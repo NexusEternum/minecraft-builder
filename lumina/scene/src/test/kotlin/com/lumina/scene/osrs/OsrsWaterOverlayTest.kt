@@ -18,17 +18,49 @@ class OsrsWaterOverlayTest {
         for (textureId in intArrayOf(1, 2, 15, 17, 24, 25)) {
             val overlay = OverlayDefinition()
             overlay.texture = textureId
-            assertTrue(OsrsWaterOverlay.isWaterOverlay(overlay), "texture $textureId should be water")
+            assertTrue(OsrsWaterOverlay.isWaterOverlayByTexture(overlay), "texture $textureId should be water")
         }
+    }
+
+    @Test
+    fun rlhdWaterOverlayIdsAreRecognized() {
+        // 117HD tile_overrides.json: WATER_FLAT->6, WATER->151, Varrock fountain pools use flat water overlays.
+        for (overlayId in intArrayOf(6, 151, 161, 380)) {
+            assertTrue(OsrsWaterOverlay.isWaterOverlayId(overlayId), "overlay $overlayId should be water")
+        }
+        val stoneOverlay = OverlayDefinition()
+        stoneOverlay.texture = 46
+        val classification = OsrsWaterOverlay.classifyWaterTile(overlayId = 999, overlay = stoneOverlay)
+        assertFalse(classification.isWater)
+        assertFalse(classification.byOverlayId)
+        assertFalse(classification.byTextureId)
+    }
+
+    @Test
+    fun overlayIdDetectionDoesNotRequireOverlayDefinition() {
+        val classification = OsrsWaterOverlay.classifyWaterTile(overlayId = 6, overlay = null)
+        assertTrue(classification.isWater)
+        assertTrue(classification.byOverlayId)
+        assertFalse(classification.byTextureId)
+    }
+
+    @Test
+    fun textureIdIsSecondarySignalWhenOverlayIdUnknown() {
+        val overlay = OverlayDefinition()
+        overlay.texture = 1
+        val classification = OsrsWaterOverlay.classifyWaterTile(overlayId = 999, overlay = overlay)
+        assertTrue(classification.isWater)
+        assertFalse(classification.byOverlayId)
+        assertTrue(classification.byTextureId)
     }
 
     @Test
     fun nonWaterTexturesAreExcluded() {
         val overlay = OverlayDefinition()
         overlay.texture = 46 // Varrock fountain ground stone per rs-codes
-        assertFalse(OsrsWaterOverlay.isWaterOverlay(overlay))
+        assertFalse(OsrsWaterOverlay.isWaterOverlayByTexture(overlay))
         overlay.texture = -1
-        assertFalse(OsrsWaterOverlay.isWaterOverlay(overlay))
+        assertFalse(OsrsWaterOverlay.isWaterOverlayByTexture(overlay))
     }
 
     @Test

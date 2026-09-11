@@ -12,7 +12,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** Bumped on renderer-affecting commits so screenshots prove which build is running. */
-const val BUILD_STAMP = "b28-specular"
+const val BUILD_STAMP = "b29-water2"
 
 @Singleton
 class OverlayRenderer @Inject constructor(

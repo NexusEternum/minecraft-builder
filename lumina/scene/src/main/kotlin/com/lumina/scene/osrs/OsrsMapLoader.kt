@@ -261,6 +261,8 @@ class OsrsMapLoader @Inject constructor(
         var terrainTriangleCount = 0
         var terrainMeshCount = 0
         var overlayWaterTiles = 0
+        var waterTilesByOverlayId = 0
+        var waterTilesByTextureId = 0
         val planeLimit = maxVisiblePlane + 1
 
         for (plane in 0 until planeLimit) {
@@ -269,7 +271,7 @@ class OsrsMapLoader @Inject constructor(
                     val startX = chunkX * CHUNK_SIZE
                     val startY = chunkY * CHUNK_SIZE
 
-                    val (terrainMesh, waterMesh, chunkWaterTiles) = buildChunkMeshes(
+                    val chunkMeshes = buildChunkMeshes(
                         region,
                         plane,
                         startX,
@@ -282,7 +284,11 @@ class OsrsMapLoader @Inject constructor(
                         originBaseY,
                         locationTilesByPlane[plane]
                     )
-                    overlayWaterTiles += chunkWaterTiles
+                    overlayWaterTiles += chunkMeshes.waterTiles
+                    waterTilesByOverlayId += chunkMeshes.waterTilesByOverlayId
+                    waterTilesByTextureId += chunkMeshes.waterTilesByTextureId
+                    val terrainMesh = chunkMeshes.terrain
+                    val waterMesh = chunkMeshes.water
 
                     if (terrainMesh.triangleCount > 0) {
                         val node = sceneGraph.createNode("terrain_${regionId}_p${plane}_${chunkX}_${chunkY}")
@@ -350,8 +356,8 @@ class OsrsMapLoader @Inject constructor(
 
         log.info(
             "Loaded OSRS region {} at origin ({}, {}): {} tiles, {} terrain meshes, {} terrain triangles, " +
-                "{} overlay water tiles, {} objects placed (skipped-no-model={}, skipped-type={}, skipped-cap={}, " +
-                "deduped={}, model-face water meshes={})",
+                "{} overlay water tiles (by overlay-id={}, by texture-id={}), {} objects placed " +
+                "(skipped-no-model={}, skipped-type={}, skipped-cap={}, deduped={}, model-face water meshes={})",
             regionId,
             originBaseX,
             originBaseY,
@@ -359,6 +365,8 @@ class OsrsMapLoader @Inject constructor(
             terrainMeshCount,
             terrainTriangleCount,
             overlayWaterTiles,
+            waterTilesByOverlayId,
+            waterTilesByTextureId,
             objectStats.placed,
             objectStats.skippedNoModel,
             objectStats.skippedType,
@@ -714,18 +722,25 @@ class OsrsMapLoader @Inject constructor(
         return null
     }
 
-    private fun isWaterTile(
+    private fun classifyWaterTile(
         region: Region,
         plane: Int,
         tileX: Int,
         tileY: Int,
         overlayManager: OverlayManager
-    ): Boolean {
+    ): OsrsWaterOverlay.WaterTileClassification {
         val overlayId = region.getOverlayId(plane, tileX, tileY)
-        if (overlayId <= 0) return false
-        val overlay = overlayManager.provide(overlayId) ?: return false
-        return OsrsWaterOverlay.isWaterOverlay(overlay)
+        val overlay = if (overlayId > 0) overlayManager.provide(overlayId) else null
+        return OsrsWaterOverlay.classifyWaterTile(overlayId, overlay)
     }
+
+    private data class ChunkMeshResult(
+        val terrain: MeshComponent,
+        val water: MeshComponent,
+        val waterTiles: Int,
+        val waterTilesByOverlayId: Int,
+        val waterTilesByTextureId: Int
+    )
 
     private fun buildChunkMeshes(
         region: Region,
@@ -739,7 +754,7 @@ class OsrsMapLoader @Inject constructor(
         originBaseX: Int,
         originBaseY: Int,
         locationTiles: Set<Long>
-    ): Triple<MeshComponent, MeshComponent, Int> {
+    ): ChunkMeshResult {
         val tilesPerChunk = CHUNK_SIZE * CHUNK_SIZE
         val terrainVerts = FloatArray(tilesPerChunk * 4 * FLOATS_PER_VERTEX)
         val terrainIndices = IntArray(tilesPerChunk * 2 * 3)
@@ -752,6 +767,8 @@ class OsrsMapLoader @Inject constructor(
         var waterVi = 0
         var waterIi = 0
         var waterTiles = 0
+        var waterTilesByOverlayId = 0
+        var waterTilesByTextureId = 0
 
         for (localY in 0 until CHUNK_SIZE) {
             for (localX in 0 until CHUNK_SIZE) {
@@ -768,7 +785,8 @@ class OsrsMapLoader @Inject constructor(
                     continue
                 }
 
-                val water = isWaterTile(region, plane, tileX, tileY, overlayManager)
+                val waterClass = classifyWaterTile(region, plane, tileX, tileY, overlayManager)
+                val water = waterClass.isWater
                 val packedColor = if (water) {
                     0f
                 } else {
@@ -821,6 +839,8 @@ class OsrsMapLoader @Inject constructor(
                     waterVi = vi
                     waterIi = ii
                     waterTiles++
+                    if (waterClass.byOverlayId) waterTilesByOverlayId++
+                    if (waterClass.byTextureId) waterTilesByTextureId++
                 } else {
                     terrainVi = vi
                     terrainIi = ii
@@ -851,7 +871,13 @@ class OsrsMapLoader @Inject constructor(
             )
         }
 
-        return Triple(terrainMesh, waterMesh, waterTiles)
+        return ChunkMeshResult(
+            terrain = terrainMesh,
+            water = waterMesh,
+            waterTiles = waterTiles,
+            waterTilesByOverlayId = waterTilesByOverlayId,
+            waterTilesByTextureId = waterTilesByTextureId
+        )
     }
 
     private fun packTileColorToUv(color: FloatArray): Float {

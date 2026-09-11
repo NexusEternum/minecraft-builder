@@ -261,17 +261,27 @@ void main() {
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     float NdotV = max(dot(normal, V), 0.0);
     vec3 F = fresnelSchlick(F0, NdotV);
-    float pSpec = clamp(luminance(F0) + (1.0 - roughness) * 0.5, 0.05, 0.9);
-    float pDiff = 1.0 - pSpec;
+    // Rough dielectrics: pure diffuse bounce (pre-b28). Smooth dielectrics + metals: two-lobe sampling.
+    bool useSpecularLobe = metallic >= 0.5 || roughness <= 0.3;
+    float pSpec = 0.0;
+    float pDiff = 1.0;
+    if (useSpecularLobe) {
+        pSpec = clamp(luminance(F0) + (1.0 - roughness) * 0.5, 0.05, 0.75);
+        pDiff = 1.0 - pSpec;
+    }
 
-    if (randomFloat(payload.seed) < pSpec) {
+    if (useSpecularLobe && randomFloat(payload.seed) < pSpec) {
         payload.bounceDir = sampleSpecularBounce(normal, V, roughness, payload.seed);
         // Specular throughput: Fresnel (not albedo for dielectrics); unbiased via 1/pSpec.
         payload.brdfWeight = min(max(F / pSpec, vec3(0.0)), vec3(4.0));
     } else {
         payload.bounceDir = cosineWeightedHemisphere(normal, payload.seed);
-        // Diffuse throughput: albedo scaled by (1-metallic); unbiased via 1/pDiff.
-        payload.brdfWeight = min(max(albedo * (1.0 - metallic) / pDiff, vec3(0.0)), vec3(4.0));
+        if (useSpecularLobe) {
+            // Diffuse throughput: albedo scaled by (1-metallic); unbiased via 1/pDiff.
+            payload.brdfWeight = min(max(albedo * (1.0 - metallic) / pDiff, vec3(0.0)), vec3(4.0));
+        } else {
+            payload.brdfWeight = min(max(albedo * (1.0 - metallic), vec3(0.0)), vec3(4.0));
+        }
     }
 
     vec3 ambient = albedo * vec3(0.01);
