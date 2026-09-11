@@ -364,12 +364,17 @@ class LuminaClient(private val args: Array<String>) {
         val now = System.currentTimeMillis()
         if (now - lastCameraDiagLogMs >= 1000L) {
             lastCameraDiagLogMs = now
-            log.debug(
-                "--play: camera world tile=({}, {}), player world tile=({}, {}), lumina pos=({}, {}, {})",
+            val facing = OsrsCoordinateMapper.cardinalFacingFromForward(
+                luminaCamera.forwardX,
+                luminaCamera.forwardZ
+            )
+            log.info(
+                "--play: camera world tile=({}, {}), yaw=0x{} ({}), facing={}, lumina pos=({}, {}, {})",
                 snapshot.cameraWorldTileX(),
                 snapshot.cameraWorldTileY(),
-                snapshot.playerWorldTileX(),
-                snapshot.playerWorldTileY(),
+                Integer.toHexString(snapshot.cameraYaw),
+                snapshot.cameraYaw,
+                facing,
                 luminaCamera.x,
                 luminaCamera.y,
                 luminaCamera.z

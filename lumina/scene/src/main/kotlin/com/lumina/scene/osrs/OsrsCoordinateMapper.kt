@@ -1,6 +1,7 @@
 package com.lumina.scene.osrs
 
 import kotlin.math.PI
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -142,15 +143,38 @@ object OsrsCoordinateMapper {
     /**
      * OSRS camera forward in Lumina world coords (unit vector).
      *
-     * Derived from Perspective.localToCanvasGpu yaw-then-pitch (X=east, Y=north, Z=up):
-     *   osrsForward = (sin(y)cos(p), cos(y)cos(p), −sin(p))
-     * Mapped into right-handed Lumina (X=east, Y=up, Z=south):
-     *   luminaForward = (osrsEast, osrsUp, −osrsNorth)
+     * ## Derivation (Perspective.localToCanvasCpu / localToCanvasGpu)
      *
-     * Pinned cases:
-     *   yaw=0, pitch=0 → (0, 0, −1) north
-     *   yaw=0x1000 (90°), pitch=0 → (1, 0, 0) east
-     *   pitch>0 → forward.y < 0 (looking down)
+     * Scene-local axes: `x` = east, `y` = north, `z` = up. Relative to camera:
+     * ```
+     * x1 =  x·cos(yaw) + y·sin(yaw)
+     * y1 =  y·cos(yaw) − x·sin(yaw)
+     * y2 =  z·cos(pitch) − y1·sin(pitch)
+     * z1 =  y1·cos(pitch) + z·sin(pitch)      // depth; visible when z1 ≥ 50
+     * screenX = viewportW/2 + x1·scale/z1
+     * screenY = viewportH/2 + y2·scale/z1
+     * ```
+     * Screen centre (`x1 = 0`, `y2 = 0`, `z1 > 0`). At `pitch = 0`: `z = 0`, `y1 = z1 > 0`, so
+     * `x·cos + y·sin = 0` and `y > 0`. With `cos(yaw) > 0` this gives the horizontal unit vector
+     * `(x, y) = (−sin(yaw), cos(yaw))` in OSRS east/north.
+     *
+     * **Camera yaw zero-direction (JAU14, [Client.getCameraYaw]):** index `0` → `yaw_rad = 0` →
+     * `(x, y) = (0, 1)` → **north** (+Y). Increasing yaw advances **clockwise** on the compass
+     * (east → south → west): `0x1000` → west, `0x2000` → south, `0x3000` → east.
+     *
+     * **Pitch sign:** `camAngleX` defaults to `128`; range ≈`128…512` JAU14 (`Client` / RSClient).
+     * Larger pitch ⇒ larger `sin(pitch)` ⇒ more negative `y2` contribution ⇒ camera tilted **down**
+     * (horizon moves up on screen). Mapped to Lumina: `forwardY = −sin(pitch) < 0`.
+     *
+     * **Entity orientation cross-check** ([net.runelite.api.coords.Angle], OSRS docs): NPC/player
+     * facing uses JAU11 (`0…2047`, `0x4000` in JAU14 = `angle << 3`) where **0 = south** and
+     * **1024 = north**. That is the *entity facing* convention, **not** [Client.getCameraYaw]:
+     * camera yaw `0` already faces north (see `camAngleY = 0` default + minimap north-up).
+     *
+     * ## Lumina mapping (X = east, Y = up, Z = south; north = −Z)
+     * ```
+     * luminaForward = (−sin(yaw)·cos(pitch), −sin(pitch), −cos(yaw)·cos(pitch))
+     * ```
      */
     fun osrsForwardVectorLumina(cameraPitch: Int, cameraYaw: Int): Triple<Float, Float, Float> {
         val pitchRad = jau14ToRadians(cameraPitch).toFloat()
@@ -159,10 +183,27 @@ object OsrsCoordinateMapper {
         val sp = sin(pitchRad)
         val sy = sin(yawRad)
         val cy = cos(yawRad)
-        val forwardX = sy * cp
+        val forwardX = -sy * cp
         val forwardY = -sp
         val forwardZ = -cy * cp
         return normalizeTriple(forwardX, forwardY, forwardZ)
+    }
+
+    /** Eight-way compass label from a horizontal Lumina forward (north = −Z). */
+    fun cardinalFacingFromForward(forwardX: Float, forwardZ: Float): String {
+        if (forwardX * forwardX + forwardZ * forwardZ < 1e-8f) return "?"
+        val degrees = Math.toDegrees(atan2(forwardX.toDouble(), -forwardZ.toDouble()))
+        val bearing = ((degrees + 360.0) % 360.0).toFloat()
+        return when {
+            bearing < 22.5f || bearing >= 337.5f -> "N"
+            bearing < 67.5f -> "NE"
+            bearing < 112.5f -> "E"
+            bearing < 157.5f -> "SE"
+            bearing < 202.5f -> "S"
+            bearing < 247.5f -> "SW"
+            bearing < 292.5f -> "W"
+            else -> "NW"
+        }
     }
 
     /** Lumina tile centre in world units for a region-local tile coordinate. */

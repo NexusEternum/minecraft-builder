@@ -165,19 +165,37 @@ class OsrsCoordinateMapperTest {
     }
 
     @Test
-    fun osrsYawZeroForwardIsNorthMinusZ() {
+    fun yawZeroFacesNorth() {
         val (fx, fy, fz) = OsrsCoordinateMapper.osrsForwardVectorLumina(0, 0)
         assertEquals(0f, fx, 0.001f)
         assertEquals(0f, fy, 0.001f)
         assertEquals(-1f, fz, 0.001f)
+        assertEquals("N", OsrsCoordinateMapper.cardinalFacingFromForward(fx, fz))
     }
 
     @Test
-    fun osrsYawQuarterTurnForwardIsEastPlusX() {
+    fun yawOneQuarterTurnFacesWest() {
         val (fx, fy, fz) = OsrsCoordinateMapper.osrsForwardVectorLumina(0, 0x1000)
-        assertEquals(1f, fx, 0.01f)
+        assertEquals(-1f, fx, 0.01f)
         assertEquals(0f, fy, 0.01f)
         assertEquals(0f, fz, 0.01f)
+        assertEquals("W", OsrsCoordinateMapper.cardinalFacingFromForward(fx, fz))
+    }
+
+    @Test
+    fun yawHalfTurnFacesSouth() {
+        val (fx, _, fz) = OsrsCoordinateMapper.osrsForwardVectorLumina(0, 0x2000)
+        assertEquals(0f, fx, 0.01f)
+        assertEquals(1f, fz, 0.01f)
+        assertEquals("S", OsrsCoordinateMapper.cardinalFacingFromForward(fx, fz))
+    }
+
+    @Test
+    fun yawThreeQuarterTurnFacesEast() {
+        val (fx, _, fz) = OsrsCoordinateMapper.osrsForwardVectorLumina(0, 0x3000)
+        assertEquals(1f, fx, 0.01f)
+        assertEquals(0f, fz, 0.01f)
+        assertEquals("E", OsrsCoordinateMapper.cardinalFacingFromForward(fx, fz))
     }
 
     @Test
