@@ -24,8 +24,9 @@ class SVGFDenoiser @Inject constructor(
     private var atrousDescriptorSetB: Long = 0
     private var atrousDescriptorSetC: Long = 0
 
-    var atrousIterations: Int = 3
-    var temporalAlpha: Float = 0.1f
+    // Must stay ODD so the final A-Trous pass writes to bloomScratchA (post-process input).
+    var atrousIterations: Int = 5
+    var temporalAlpha: Float = 0.08f
     var momentAlpha: Float = 0.3f
     var sigmaLuminance: Float = 4.0f
     var sigmaNormal: Float = 128.0f
@@ -136,15 +137,18 @@ class SVGFDenoiser @Inject constructor(
 
         RenderTargets.insertComputeBarrier(cmdBuf)
 
-        // Passes 2..N: A-Trous wavelet filter (ping-pong across three descriptor sets)
+        // Passes 2..N: A-Trous wavelet filter (ping-pong across three descriptor sets).
+        // Iteration 0 reads temporal output (Set A); thereafter alternate B, C, B, C, ...
         vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, atrous.pipeline)
-        val atrousSets = longArrayOf(atrousDescriptorSetA, atrousDescriptorSetB, atrousDescriptorSetC)
 
         for (i in 0 until atrousIterations) {
             val stepSize = 1 shl i
+            val atrousSet = if (i == 0) atrousDescriptorSetA
+                else if (i % 2 == 1) atrousDescriptorSetB
+                else atrousDescriptorSetC
             MemoryStack.stackPush().use { stack ->
                 vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
-                    atrous.pipelineLayout, 0, stack.longs(atrousSets[i % atrousSets.size]), null)
+                    atrous.pipelineLayout, 0, stack.longs(atrousSet), null)
 
                 val pushData = stack.calloc(20)
                 pushData.putInt(stepSize)
