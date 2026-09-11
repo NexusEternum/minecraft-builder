@@ -28,8 +28,8 @@ layout(binding = 4, set = 0, scalar) uniform CameraUBO {
 // Hosek-Wilkie sky model approximation
 vec3 proceduralSky(vec3 dir) {
     float timeOfDay = camera.time;
-    float sunAngle = timeOfDay * 3.14159265;
-    vec3 sunDir = normalize(vec3(cos(sunAngle) * 0.5, sin(sunAngle), cos(sunAngle) * 0.3));
+    float sunAngle = timeOfDay * 3.14159265; // still used for sky gradient tint below
+    vec3 sunDir = normalize(vec3(0.65, 0.45, 0.4));
 
     float sunDot = max(dot(dir, sunDir), 0.0);
     float horizon = 1.0 - abs(dir.y);

@@ -151,7 +151,7 @@ void main() {
 
     // Debug mode: maxBounces==0 outputs flat albedo with simple directional light
     if (camera.maxBounces == 0u) {
-        vec3 sunDir = normalize(vec3(0.5, 0.8, 0.3));
+        vec3 sunDir = normalize(vec3(0.65, 0.45, 0.4));
         float NdotL = max(dot(normal, sunDir), 0.0);
         payload.color = albedo * (0.15 + 0.85 * NdotL) + emissive;
         payload.normal = normal;
@@ -163,7 +163,7 @@ void main() {
         return;
     }
 
-    vec3 sunDir = normalize(vec3(0.5, 0.8, 0.3));
+    vec3 sunDir = normalize(vec3(0.65, 0.45, 0.4));
     vec3 sunColor = vec3(3.0, 2.7, 2.2);
 
     shadowed = true;
