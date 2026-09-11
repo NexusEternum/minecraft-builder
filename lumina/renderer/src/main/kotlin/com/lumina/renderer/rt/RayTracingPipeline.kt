@@ -1,5 +1,6 @@
 package com.lumina.renderer.rt
 
+import com.lumina.renderer.denoise.TemporalDenoiseMotion
 import com.lumina.renderer.vulkan.*
 import org.lwjgl.system.MemoryStack
 import org.lwjgl.system.MemoryUtil
@@ -411,6 +412,18 @@ class RayTracingPipeline @Inject constructor(
     private var frameCount: Long = 0
     private val prevViewProj = FloatArray(16) { if (it % 5 == 0) 1f else 0f }
 
+    private var lastCameraPosX = 0f
+    private var lastCameraPosY = 0f
+    private var lastCameraPosZ = 0f
+    private var lastCameraForwardX = 0f
+    private var lastCameraForwardY = 0f
+    private var lastCameraForwardZ = -1f
+    private var hasPreviousCamera = false
+
+    /** 1 when camera position or forward changed since the previous update; 0 when still. */
+    var cameraMovedFactor: Float = 1f
+        private set
+
     fun updateCamera(
         posX: Float, posY: Float, posZ: Float,
         pitch: Float, yaw: Float, fov: Float,
@@ -455,6 +468,20 @@ class RayTracingPipeline @Inject constructor(
         val view = invertMat4(viewInv)
         val proj = invertMat4(projInv)
         val viewProj = multiplyMat4(proj, view)
+
+        cameraMovedFactor = TemporalDenoiseMotion.cameraMovedFactor(
+            posX, posY, posZ, forwardX, forwardY, forwardZ,
+            lastCameraPosX, lastCameraPosY, lastCameraPosZ,
+            lastCameraForwardX, lastCameraForwardY, lastCameraForwardZ,
+            hasPreviousCamera
+        )
+        lastCameraPosX = posX
+        lastCameraPosY = posY
+        lastCameraPosZ = posZ
+        lastCameraForwardX = forwardX
+        lastCameraForwardY = forwardY
+        lastCameraForwardZ = forwardZ
+        hasPreviousCamera = true
 
         val dev = ctx.device!!
         MemoryStack.stackPush().use { stack ->

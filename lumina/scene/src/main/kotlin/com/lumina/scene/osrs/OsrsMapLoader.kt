@@ -383,7 +383,7 @@ class OsrsMapLoader @Inject constructor(
 
         val modelLoader = ModelLoader()
         val modelDefCache = HashMap<Int, ModelDefinition>()
-        val meshCache = HashMap<Pair<Int, Int>, MeshComponent>()
+        val meshCache = HashMap<OsrsObjectMeshBuilder.MeshCacheKey, MeshComponent>()
 
         var placed = 0
         var skippedNoModel = 0
@@ -397,7 +397,7 @@ class OsrsMapLoader @Inject constructor(
                 continue
             }
 
-            if (!isSupportedLocationType(location.type)) {
+            if (!OsrsObjectMeshBuilder.isSupportedLocationType(location.type)) {
                 skippedType++
                 continue
             }
@@ -421,7 +421,7 @@ class OsrsMapLoader @Inject constructor(
                 }
 
                 val orientation = location.orientation and 3
-                val cacheKey = modelId to orientation
+                val cacheKey = OsrsObjectMeshBuilder.meshCacheKey(location.id, modelId, orientation)
                 var mesh = meshCache[cacheKey]
                 if (mesh == null) {
                     val modelDef = loadModelDefinition(store, modelLoader, modelDefCache, modelId)
@@ -429,7 +429,13 @@ class OsrsMapLoader @Inject constructor(
                         skippedNoModel++
                         continue
                     }
-                    val built = modelDefinitionToMesh(modelDef, orientation)
+                    val built = OsrsObjectMeshBuilder.modelDefinitionToMesh(
+                        modelDef,
+                        orientation,
+                        objectDef.recolorToFind,
+                        objectDef.recolorToReplace,
+                        objectDef.retextureToFind
+                    )
                     if (built.triangleCount == 0) {
                         skippedNoModel++
                         continue
@@ -438,7 +444,6 @@ class OsrsMapLoader @Inject constructor(
                     mesh = built
                 } else {
                     dedupedMeshes++
-                    mesh = meshCache[cacheKey]!!
                 }
 
                 // Region.loadLocations() stores absolute world tile coords (region base + loc-local).
@@ -523,150 +528,6 @@ class OsrsMapLoader @Inject constructor(
         return modelDef
     }
 
-    private fun modelDefinitionToMesh(model: ModelDefinition, orientation: Int): MeshComponent {
-        val vertexCount = model.vertexCount
-        val faceCount = model.faceCount
-        if (vertexCount <= 0 || faceCount <= 0) {
-            return MeshComponent(FloatArray(0), IntArray(0), 0, 0)
-        }
-
-        val srcX = model.vertexX
-        val srcY = model.vertexY
-        val srcZ = model.vertexZ
-        val idx1 = model.faceIndices1
-        val idx2 = model.faceIndices2
-        val idx3 = model.faceIndices3
-        val faceColors = model.faceColors
-        val faceTextures = model.faceTextures
-        val faceTransparencies = model.faceTransparencies
-
-        val rotatedX = IntArray(vertexCount)
-        val rotatedY = IntArray(vertexCount)
-        val rotatedZ = IntArray(vertexCount)
-        for (i in 0 until vertexCount) {
-            val x = srcX[i]
-            val y = srcY[i]
-            val z = srcZ[i]
-            // OSRS object orientation is a Y-axis rotation; world Z is south (north = -Z), so negate Z.
-            when (orientation and 3) {
-                0 -> {
-                    rotatedX[i] = x
-                    rotatedY[i] = y
-                    rotatedZ[i] = -z
-                }
-                1 -> {
-                    rotatedX[i] = z
-                    rotatedY[i] = y
-                    rotatedZ[i] = x
-                }
-                2 -> {
-                    rotatedX[i] = -x
-                    rotatedY[i] = y
-                    rotatedZ[i] = z
-                }
-                else -> {
-                    rotatedX[i] = -z
-                    rotatedY[i] = y
-                    rotatedZ[i] = -x
-                }
-            }
-        }
-
-        var visibleFaces = 0
-        for (face in 0 until faceCount) {
-            if (faceTransparencies != null && (faceTransparencies[face].toInt() and 0xFF) > 250) {
-                continue
-            }
-            visibleFaces++
-        }
-
-        if (visibleFaces == 0) {
-            return MeshComponent(FloatArray(0), IntArray(0), 0, 0)
-        }
-
-        val outVertexCount = visibleFaces * 3
-        val verts = FloatArray(outVertexCount * FLOATS_PER_VERTEX)
-        val indices = IntArray(visibleFaces * 3)
-
-        var vi = 0
-        var ii = 0
-        for (face in 0 until faceCount) {
-            if (faceTransparencies != null && (faceTransparencies[face].toInt() and 0xFF) > 250) {
-                continue
-            }
-
-            val i1 = idx1[face]
-            val i2 = idx2[face]
-            val i3 = idx3[face]
-
-            val ax = rotatedX[i1] * MODEL_SCALE
-            val ay = -rotatedY[i1] * MODEL_SCALE
-            val az = rotatedZ[i1] * MODEL_SCALE
-            val bx = rotatedX[i2] * MODEL_SCALE
-            val by = -rotatedY[i2] * MODEL_SCALE
-            val bz = rotatedZ[i2] * MODEL_SCALE
-            val cx = rotatedX[i3] * MODEL_SCALE
-            val cy = -rotatedY[i3] * MODEL_SCALE
-            val cz = rotatedZ[i3] * MODEL_SCALE
-
-            val e1x = bx - ax
-            val e1y = by - ay
-            val e1z = bz - az
-            val e2x = cx - ax
-            val e2y = cy - ay
-            val e2z = cz - az
-            var nx = e1y * e2z - e1z * e2y
-            var ny = e1z * e2x - e1x * e2z
-            var nz = e1x * e2y - e1y * e2x
-            val len = sqrt(nx * nx + ny * ny + nz * nz)
-            if (len > 0f) {
-                nx /= len
-                ny /= len
-                nz /= len
-            } else {
-                nx = 0f
-                ny = 1f
-                nz = 0f
-            }
-
-            val hasTexture = faceTextures != null &&
-                face < faceTextures.size &&
-                faceTextures[face].toInt() != -1
-            val rgb = if (hasTexture) {
-                OsrsColorDecoder.texturedFallbackLinear()
-            } else {
-                val hsl = if (faceColors != null && face < faceColors.size) faceColors[face].toInt() else 0
-                OsrsColorDecoder.hslToRgb(hsl)
-            }
-            val packedColor = packTileColorToUv(rgb)
-
-            val cornerX = floatArrayOf(ax, bx, cx)
-            val cornerY = floatArrayOf(ay, by, cy)
-            val cornerZ = floatArrayOf(az, bz, cz)
-            val baseVertex = vi
-
-            for (corner in 0 until 3) {
-                val off = vi * FLOATS_PER_VERTEX
-                verts[off] = cornerX[corner]
-                verts[off + 1] = cornerY[corner]
-                verts[off + 2] = cornerZ[corner]
-                verts[off + 3] = nx
-                verts[off + 4] = ny
-                verts[off + 5] = nz
-                verts[off + 6] = packedColor
-                verts[off + 7] = 0f
-                vi++
-            }
-
-            // Z-mirror flips winding; swap two corners to restore outward-facing normals.
-            indices[ii++] = baseVertex
-            indices[ii++] = baseVertex + 2
-            indices[ii++] = baseVertex + 1
-        }
-
-        return MeshComponent(verts, indices, outVertexCount, visibleFaces)
-    }
-
     private fun resolveModelId(objectModels: IntArray?, objectTypes: IntArray?, locationType: Int): Int {
         if (objectModels == null || objectModels.isEmpty()) return -1
         if (objectTypes != null) {
@@ -677,10 +538,6 @@ class OsrsMapLoader @Inject constructor(
             }
         }
         return objectModels[0]
-    }
-
-    private fun isSupportedLocationType(type: Int): Boolean {
-        return type in 0..3 || type in 10..11 || type == 22
     }
 
     private fun packRegionTile(localTileX: Int, localTileY: Int): Long =
@@ -935,7 +792,7 @@ class OsrsMapLoader @Inject constructor(
         private const val CHUNK_SIZE = 8
         private const val CHUNKS_PER_AXIS = REGION_SIZE / CHUNK_SIZE
         private const val PLANE_COUNT = 4
-        private const val FLOATS_PER_VERTEX = 8
+        private const val FLOATS_PER_VERTEX = 8 // terrain vertices; object mesh layout is in OsrsObjectMeshBuilder
         /** Max placed object instances across the entire multi-region scene (not per region). */
         const val MAX_SCENE_OBJECTS = 12000
         private val TEXTURED_OVERLAY_FALLBACK = OsrsColorDecoder.texturedFallbackLinear()

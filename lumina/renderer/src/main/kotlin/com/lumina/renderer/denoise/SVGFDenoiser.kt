@@ -12,7 +12,8 @@ import javax.inject.Singleton
 class SVGFDenoiser @Inject constructor(
     private val ctx: VulkanContext,
     private val shaderCompiler: ShaderCompiler,
-    private val renderTargets: RenderTargets
+    private val renderTargets: RenderTargets,
+    private val rtPipeline: com.lumina.renderer.rt.RayTracingPipeline
 ) {
     private val log = LoggerFactory.getLogger(SVGFDenoiser::class.java)
 
@@ -56,7 +57,7 @@ class SVGFDenoiser @Inject constructor(
         )
         temporalPipeline = ComputePipelineFactory.create(
             ctx, shaderCompiler, "/shaders/denoise/svgf_temporal.comp", bindings,
-            pushConstantSize = 12 // minAlpha(4) + minMomentAlpha(4) + frameCount(4)
+            pushConstantSize = 16 // minAlpha(4) + minMomentAlpha(4) + frameCount(4) + cameraMoved(4)
         )
     }
 
@@ -128,10 +129,11 @@ class SVGFDenoiser @Inject constructor(
             vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE,
                 temporal.pipelineLayout, 0, stack.longs(temporal.descriptorSet), null)
 
-            val pushData = stack.calloc(12)
+            val pushData = stack.calloc(16)
             pushData.putFloat(temporalAlpha)
             pushData.putFloat(momentAlpha)
             pushData.putInt(frameCount.toInt())
+            pushData.putFloat(rtPipeline.cameraMovedFactor)
             pushData.flip()
             vkCmdPushConstants(cmdBuf, temporal.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushData)
         }

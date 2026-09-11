@@ -13,10 +13,12 @@ layout(push_constant) uniform Params {
     float minAlpha;       // floor for color blend: max(1/historyLen, minAlpha)
     float minMomentAlpha; // floor for moment blend: max(1/historyLen, minMomentAlpha)
     uint frameCount;
+    float cameraMoved;    // 1 = camera moved this frame, 0 = still
 };
 
 const uint MAX_HISTORY_LEN = 64u;
 const uint CLAMP_HISTORY_CAP = 4u;
+const uint MOTION_HISTORY_CAP = 8u;
 
 vec3 rgbToYCoCg(vec3 rgb) {
     return vec3(
@@ -70,20 +72,30 @@ void main() {
         vec3 center = (minColor + maxColor) * 0.5;
         vec3 halfExtent = (maxColor - minColor) * 0.5;
 
-        // Widen clamp box as history grows so stable pixels can fully converge.
-        float aabbScale = min(1.0 + float(prevHistoryLen) * 0.05, 3.0);
-        vec3 minColorWide = center - halfExtent * aabbScale;
-        vec3 maxColorWide = center + halfExtent * aabbScale;
-
         vec3 historyYCoCg = rgbToYCoCg(history.rgb);
         bool outsideOriginal = any(lessThan(historyYCoCg, minColor)) ||
                                any(greaterThan(historyYCoCg, maxColor));
-        vec3 clampedYCoCg = clamp(historyYCoCg, minColorWide, maxColorWide);
-        bool clampModified = distance(clampedYCoCg, historyYCoCg) > 1e-4;
+
+        vec3 clampedYCoCg;
+        bool clampModified;
+        if (cameraMoved > 0.5) {
+            // Camera motion: tight AABB only — skip widening that drags stale history.
+            clampedYCoCg = clamp(historyYCoCg, minColor, maxColor);
+            clampModified = distance(clampedYCoCg, historyYCoCg) > 1e-4;
+        } else {
+            // Widen clamp box as history grows so stable pixels can fully converge.
+            float aabbScale = min(1.0 + float(prevHistoryLen) * 0.05, 3.0);
+            vec3 minColorWide = center - halfExtent * aabbScale;
+            vec3 maxColorWide = center + halfExtent * aabbScale;
+            clampedYCoCg = clamp(historyYCoCg, minColorWide, maxColorWide);
+            clampModified = distance(clampedYCoCg, historyYCoCg) > 1e-4;
+        }
         vec3 clampedHistory = yCoCgToRgb(clampedYCoCg);
 
         uint historyLen = min(prevHistoryLen + 1u, MAX_HISTORY_LEN);
-        if (outsideOriginal || clampModified) {
+        if (cameraMoved > 0.5) {
+            historyLen = min(historyLen, MOTION_HISTORY_CAP);
+        } else if (outsideOriginal || clampModified) {
             historyLen = min(historyLen, CLAMP_HISTORY_CAP);
         }
 
