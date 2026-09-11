@@ -12,7 +12,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** Bumped on renderer-affecting commits so screenshots prove which build is running. */
-const val BUILD_STAMP = "b17-flat"
+const val BUILD_STAMP = "b18-origin"
 
 @Singleton
 class OverlayRenderer @Inject constructor(
@@ -28,6 +28,10 @@ class OverlayRenderer @Inject constructor(
     var showDebugInfo: Boolean = false
     var showSettings: Boolean = false
     var debugMode: Boolean = false
+
+    /** Latest camera world tile from --play mirror sync; NaN when unavailable. */
+    var cameraWorldTileX: Float = Float.NaN
+    var cameraWorldTileY: Float = Float.NaN
 
     private var fpsHistory = FloatArray(120)
     private var fpsIndex = 0
@@ -63,6 +67,9 @@ class OverlayRenderer @Inject constructor(
             if (upscale.mode != UpscaleMode.NONE) {
                 sb.append(" -> ${upscale.renderWidth}x${upscale.renderHeight} (${upscale.quality})")
             }
+        }
+        if (!cameraWorldTileX.isNaN() && !cameraWorldTileY.isNaN()) {
+            sb.append(" | tile (${cameraWorldTileX.toInt()}, ${cameraWorldTileY.toInt()})")
         }
         if (showDebugInfo) {
             sb.append(" | ${ctx.getDeviceName()}")

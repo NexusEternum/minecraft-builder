@@ -246,4 +246,78 @@ class OsrsCoordinateMapperTest {
         assertEquals(-2.56f, OsrsCoordinateMapper.luminaYFromHeightUnits128(128), 0.001f)
         assertEquals(0f, OsrsCoordinateMapper.luminaYFromHeightUnits128(0), 0.001f)
     }
+
+    /**
+     * Varrock fountain end-to-end trace (region 12853, tile ≈ (3213, 3428)):
+     *   scene-load origin ≈ (3161, 3376); region base (3200, 3392); local tile (13, 36)
+     *   geometry lumina XZ = (133.12, -133.12)
+     *   camera locals after scene scroll use CURRENT base, subtract LOAD origin only.
+     */
+    @Test
+    fun varrockFountainLoaderMatchesCameraWithScrolledSceneBase() {
+        val loadOriginBaseX = 3161
+        val loadOriginBaseY = 3376
+        val regionId = 12853
+        val localTileX = 13
+        val localTileY = 36
+        val playerWorldTileX = 3213f
+        val playerWorldTileY = 3428f
+
+        val (geoX, geoZ) = OsrsCoordinateMapper.regionLocalTileToLuminaXZ(
+            localTileX,
+            localTileY,
+            regionId,
+            loadOriginBaseX,
+            loadOriginBaseY
+        )
+        assertEquals(133.12f, geoX, 0.01f)
+        assertEquals(-133.12f, geoZ, 0.01f)
+
+        val currentBaseX = 3169
+        val currentBaseY = 3384
+        val cameraLocalX = ((playerWorldTileX - currentBaseX) * 128).toInt()
+        val cameraLocalY = ((playerWorldTileY - currentBaseY) * 128).toInt()
+
+        val cam = OsrsCoordinateMapper.cameraToLumina(
+            cameraX = cameraLocalX,
+            cameraY = cameraLocalY,
+            cameraZ = 0,
+            cameraPitch = 0,
+            cameraYaw = 0,
+            baseX = currentBaseX,
+            baseY = currentBaseY,
+            originBaseX = loadOriginBaseX,
+            originBaseY = loadOriginBaseY
+        )
+
+        assertEquals(geoX, cam.x, 0.01f, "camera X must match terrain at Varrock fountain")
+        assertEquals(geoZ, cam.z, 0.01f, "camera Z must match terrain at Varrock fountain")
+    }
+
+    @Test
+    fun usingLoadTimeBaseWithScrolledLocalsOffsetsCameraBySceneScroll() {
+        val loadOriginBaseX = 3161
+        val loadOriginBaseY = 3376
+        val loadBaseX = 3161
+        val loadBaseY = 3376
+        val currentBaseX = 3169
+        val currentBaseY = 3384
+        val playerWorldTileX = 3213f
+        val playerWorldTileY = 3428f
+
+        val cameraLocalX = ((playerWorldTileX - currentBaseX) * 128).toInt()
+        val cameraLocalY = ((playerWorldTileY - currentBaseY) * 128).toInt()
+
+        val correct = OsrsCoordinateMapper.cameraToLumina(
+            cameraLocalX, cameraLocalY, 0, 0, 0,
+            currentBaseX, currentBaseY, loadOriginBaseX, loadOriginBaseY
+        )
+        val wrong = OsrsCoordinateMapper.cameraToLumina(
+            cameraLocalX, cameraLocalY, 0, 0, 0,
+            loadBaseX, loadBaseY, loadOriginBaseX, loadOriginBaseY
+        )
+
+        assertEquals(8f * OsrsMapLoader.TILE_SCALE, correct.x - wrong.x, 0.01f)
+        assertEquals(8f * OsrsMapLoader.TILE_SCALE, wrong.z - correct.z, 0.01f)
+    }
 }

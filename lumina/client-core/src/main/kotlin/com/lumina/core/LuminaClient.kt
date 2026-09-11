@@ -12,6 +12,7 @@ import com.lumina.renderer.LuminaRenderer
 import com.lumina.renderer.camera.CameraController
 import com.lumina.renderer.overlay.BUILD_STAMP
 import com.lumina.renderer.overlay.OverlayRenderer
+import com.lumina.renderer.postfx.PostProcessStack
 import com.lumina.renderer.scene.DemoScene
 import com.lumina.renderer.scene.SceneBufferManager
 import com.lumina.scene.graph.MaterialComponent
@@ -48,8 +49,10 @@ class LuminaClient(private val args: Array<String>) {
     private var playMode = false
     private var liveGameView: LiveGameView? = null
     private var cameraSyncEnabled = true
-    private var sceneOriginBaseX = 0
-    private var sceneOriginBaseY = 0
+    /** Frozen scene-load origin in world tiles; geometry and camera both subtract this, never the current base. */
+    private var sceneLoadOriginBaseX = 0
+    private var sceneLoadOriginBaseY = 0
+    private var lastCameraDiagLogMs = 0L
     private var loadedRegionsKey: String? = null
     private var pendingRegionsKey: String? = null
     private var pendingRegionsStablePolls = 0
@@ -101,8 +104,12 @@ class LuminaClient(private val args: Array<String>) {
         renderer.init("Lumina - Old School RuneScape", 1920, 1080)
         setupCallbacks()
 
-        // Generate and upload scene so the path tracer has geometry
         val osrsRegionId = parseOsrsRegionId()
+        if (osrsRegionId >= 0) {
+            configureOsrsWorldRendering()
+        }
+
+        // Generate and upload scene so the path tracer has geometry
         val osrsLoaded = if (osrsRegionId >= 0) {
             val cacheDir = resolveCacheDir()
             log.info("Loading OSRS region {} from cache: {}", osrsRegionId, cacheDir.absolutePath)
@@ -179,11 +186,12 @@ class LuminaClient(private val args: Array<String>) {
 
         renderer.init("Lumina LIVE - OSRS [build $BUILD_STAMP]", 1920, 1080)
         setupCallbacks()
+        configureOsrsWorldRendering()
 
-        val loadSnapshot = liveGameView!!.latestSnapshot()?.takeIf { it.loggedIn } ?: loginSnapshot
+        val loadSnapshot = waitForStableSceneSnapshot(liveGameView!!, loginSnapshot)
         if (loadSnapshot !== loginSnapshot) {
             log.info(
-                "--play: using fresh snapshot for scene load (base=({}, {}) vs login=({}, {}))",
+                "--play: scene load snapshot base=({}, {}) vs login=({}, {})",
                 loadSnapshot.baseX,
                 loadSnapshot.baseY,
                 loginSnapshot.baseX,
@@ -195,13 +203,70 @@ class LuminaClient(private val args: Array<String>) {
             System.exit(1)
         }
 
-        syncCameraFromSnapshot(liveGameView!!.latestSnapshot()?.takeIf { it.loggedIn } ?: loadSnapshot)
+        // Use the same atomic snapshot as scene load so base/camera/regions are never mixed.
+        syncCameraFromSnapshot(loadSnapshot)
 
         printControls()
         log.info("--play: mirror window open; camera sync enabled (F8 toggles free camera)")
 
         running = true
         mainLoop()
+    }
+
+    /**
+     * Wait until the embedded client reports a coherent scene: non-empty regions and a stable base
+     * for [STABLE_SCENE_POLLS] consecutive polls. Avoids loading with base=(0,0) while WorldView
+     * is still coming up (which places geometry relative to the wrong origin).
+     */
+    private fun waitForStableSceneSnapshot(
+        liveView: LiveGameView,
+        fallback: LiveGameSnapshot
+    ): LiveGameSnapshot {
+        var lastBaseX = Int.MIN_VALUE
+        var lastBaseY = Int.MIN_VALUE
+        var stablePolls = 0
+        var lastSnapshot = fallback
+        var waitLogged = false
+
+        while (stablePolls < STABLE_SCENE_POLLS) {
+            val snapshot = liveView.latestSnapshot()
+            if (snapshot?.loggedIn == true && snapshot.isSceneReady()) {
+                if (snapshot.baseX == lastBaseX && snapshot.baseY == lastBaseY) {
+                    stablePolls++
+                } else {
+                    stablePolls = 1
+                }
+                lastBaseX = snapshot.baseX
+                lastBaseY = snapshot.baseY
+                lastSnapshot = snapshot
+            } else {
+                stablePolls = 0
+                lastBaseX = Int.MIN_VALUE
+                lastBaseY = Int.MIN_VALUE
+                if (!waitLogged) {
+                    log.info("--play: waiting for stable scene snapshot (regions + base)...")
+                    waitLogged = true
+                }
+            }
+            Thread.sleep(LIVE_POLL_INTERVAL_MS)
+        }
+
+        log.info(
+            "--play: stable scene snapshot base=({}, {}), {} regions, camera local=({}, {})",
+            lastSnapshot.baseX,
+            lastSnapshot.baseY,
+            lastSnapshot.mapRegions.size,
+            lastSnapshot.cameraX,
+            lastSnapshot.cameraY
+        )
+        return lastSnapshot
+    }
+
+    private fun configureOsrsWorldRendering() {
+        val postProcess = injector.getInstance(PostProcessStack::class.java)
+        postProcess.applyOsrsWorldDefaults()
+        log.info("OSRS world rendering: fogDensity={}, godRayIntensity={}",
+            postProcess.fogDensity, postProcess.godRayIntensity)
     }
 
     private fun waitForLogin(liveView: LiveGameView): LiveGameSnapshot {
@@ -261,8 +326,15 @@ class LuminaClient(private val args: Array<String>) {
 
         setupPlayerMarker()
 
-        sceneOriginBaseX = snapshot.baseX
-        sceneOriginBaseY = snapshot.baseY
+        sceneLoadOriginBaseX = snapshot.baseX
+        sceneLoadOriginBaseY = snapshot.baseY
+        log.info(
+            "--play: scene-load origin frozen at ({}, {}); current snapshot base=({}, {})",
+            sceneLoadOriginBaseX,
+            sceneLoadOriginBaseY,
+            snapshot.baseX,
+            snapshot.baseY
+        )
         loadedRegionsKey = OsrsCoordinateMapper.mapRegionsKey(snapshot.mapRegions)
         pendingRegionsKey = null
         pendingRegionsStablePolls = 0
@@ -280,11 +352,29 @@ class LuminaClient(private val args: Array<String>) {
             snapshot.cameraYaw,
             snapshot.baseX,
             snapshot.baseY,
-            sceneOriginBaseX,
-            sceneOriginBaseY
+            sceneLoadOriginBaseX,
+            sceneLoadOriginBaseY
         )
         camera.setPosition(luminaCamera.x, luminaCamera.y, luminaCamera.z)
         camera.setFromForwardVector(luminaCamera.forwardX, luminaCamera.forwardY, luminaCamera.forwardZ)
+
+        overlay.cameraWorldTileX = snapshot.cameraWorldTileX()
+        overlay.cameraWorldTileY = snapshot.cameraWorldTileY()
+
+        val now = System.currentTimeMillis()
+        if (now - lastCameraDiagLogMs >= 1000L) {
+            lastCameraDiagLogMs = now
+            log.debug(
+                "--play: camera world tile=({}, {}), player world tile=({}, {}), lumina pos=({}, {}, {})",
+                snapshot.cameraWorldTileX(),
+                snapshot.cameraWorldTileY(),
+                snapshot.playerWorldTileX(),
+                snapshot.playerWorldTileY(),
+                luminaCamera.x,
+                luminaCamera.y,
+                luminaCamera.z
+            )
+        }
     }
 
     private fun handleLiveMirrorUpdate() {
@@ -369,8 +459,8 @@ class LuminaClient(private val args: Array<String>) {
         val (luminaX, luminaZ) = OsrsCoordinateMapper.worldTileToLuminaXZ(
             worldTileX,
             worldTileY,
-            sceneOriginBaseX,
-            sceneOriginBaseY
+            sceneLoadOriginBaseX,
+            sceneLoadOriginBaseY
         )
         val luminaY = OsrsCoordinateMapper.luminaYFromHeightUnits128(snapshot.playerPlane * PLANE_HEIGHT_UNITS) +
             PLAYER_MARKER_SIZE * 0.5f
@@ -448,6 +538,10 @@ class LuminaClient(private val args: Array<String>) {
         private const val DEFAULT_OSRS_REGION_ID = 12850
         /** Debounce region rebuild until the new set is stable for this many live polls. */
         private const val REGION_CHANGE_STABLE_POLLS = 2
+        /** Scene base must match for this many consecutive polls before mirror load. */
+        private const val STABLE_SCENE_POLLS = 2
+        /** Matches [com.lumina.game.LiveGameState.POLL_INTERVAL_MS]. */
+        private const val LIVE_POLL_INTERVAL_MS = 33L
         private const val PLAYER_MARKER_SIZE = 0.8f
         /** OSRS nominal vertical spacing between planes in 1/128 tile height units. */
         private const val PLANE_HEIGHT_UNITS = 256

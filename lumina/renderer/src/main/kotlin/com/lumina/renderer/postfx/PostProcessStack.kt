@@ -39,6 +39,18 @@ class PostProcessStack @Inject constructor(
 
     var timeOfDay: Float = 0.5f
 
+    /** Demo/small-scene defaults tuned for the procedural arena. */
+    fun applyDemoDefaults() {
+        fogDensity = 0.0008f
+        godRayIntensity = 0.25f
+    }
+
+    /** OSRS world scale: disable distance fog and god rays that wash out multi-region vistas. */
+    fun applyOsrsWorldDefaults() {
+        fogDensity = 0f
+        godRayIntensity = 0f
+    }
+
     enum class ToneMapMode(val modeIndex: Int) { AGX(0), ACES(1), REINHARD(2), NONE(3) }
 
     private var bloomPipeline: ComputePipelineBundle? = null

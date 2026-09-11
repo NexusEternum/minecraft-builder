@@ -161,11 +161,11 @@ class OsrsMapLoader @Inject constructor(
                 lastRegionCenterWorldY = 30f
                 lastRegionCenterWorldZ = REGION_SIZE / 2f * TILE_SCALE
 
-                log.info(
-                    "Loaded {} OSRS regions at origin ({}, {}): {} tiles, {} terrain meshes, {} terrain triangles, {} objects",
-                    loadedCount,
+                logRegionLoadSummary(
+                    validRegionIds,
                     originBaseX,
                     originBaseY,
+                    loadedCount,
                     totalTiles,
                     totalTerrainMeshes,
                     totalTerrainTriangles,
@@ -824,6 +824,49 @@ class OsrsMapLoader @Inject constructor(
         val clampedX = x.coerceIn(0, REGION_SIZE - 1)
         val clampedY = y.coerceIn(0, REGION_SIZE - 1)
         return region.getTileHeight(plane, clampedX, clampedY)
+    }
+
+    private fun logRegionLoadSummary(
+        regionIds: IntArray,
+        originBaseX: Int,
+        originBaseY: Int,
+        loadedCount: Int,
+        totalTiles: Int,
+        totalTerrainMeshes: Int,
+        totalTerrainTriangles: Int,
+        totalObjects: Int
+    ) {
+        var minWorldX = Int.MAX_VALUE
+        var minWorldY = Int.MAX_VALUE
+        var maxWorldX = Int.MIN_VALUE
+        var maxWorldY = Int.MIN_VALUE
+        val regionBases = StringBuilder()
+        for (regionId in regionIds) {
+            val (regionBaseX, regionBaseY) = OsrsCoordinateMapper.regionOriginTiles(regionId)
+            if (regionBases.isNotEmpty()) regionBases.append(", ")
+            regionBases.append("$regionId@($regionBaseX,$regionBaseY)")
+            minWorldX = minOf(minWorldX, regionBaseX)
+            minWorldY = minOf(minWorldY, regionBaseY)
+            maxWorldX = maxOf(maxWorldX, regionBaseX + REGION_SIZE - 1)
+            maxWorldY = maxOf(maxWorldY, regionBaseY + REGION_SIZE - 1)
+        }
+
+        log.info(
+            "Loaded {} OSRS regions at scene-load origin ({}, {}): {} tiles, {} terrain meshes, " +
+                "{} terrain triangles, {} objects; region bases: [{}]; world tile AABB ({}, {})..({}, {})",
+            loadedCount,
+            originBaseX,
+            originBaseY,
+            totalTiles,
+            totalTerrainMeshes,
+            totalTerrainTriangles,
+            totalObjects,
+            regionBases,
+            minWorldX,
+            minWorldY,
+            maxWorldX,
+            maxWorldY
+        )
     }
 
     companion object {

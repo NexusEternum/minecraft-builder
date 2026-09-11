@@ -116,13 +116,31 @@ class LiveGameState : LiveGameView {
             )
         }
 
-        @Suppress("DEPRECATION")
-        val mapRegions = client.mapRegions ?: IntArray(0)
-        @Suppress("DEPRECATION")
+        val worldView = client.topLevelWorldView
+        if (worldView == null) {
+            log.debug("LiveGameState: logged in but top-level WorldView not ready yet")
+            return LiveGameSnapshot(
+                loggedIn = true,
+                baseX = 0,
+                baseY = 0,
+                plane = client.plane,
+                mapRegions = IntArray(0),
+                cameraX = safeCameraX(client),
+                cameraY = safeCameraY(client),
+                cameraZ = safeCameraZ(client),
+                cameraPitch = safeCameraPitch(client),
+                cameraYaw = safeCameraYaw(client),
+                playerLocalX = playerLocalX,
+                playerLocalY = playerLocalY,
+                playerPlane = playerPlane
+            )
+        }
+
+        val mapRegions = worldView.mapRegions ?: IntArray(0)
         return LiveGameSnapshot(
             loggedIn = true,
-            baseX = client.baseX,
-            baseY = client.baseY,
+            baseX = worldView.baseX,
+            baseY = worldView.baseY,
             plane = client.plane,
             mapRegions = mapRegions.copyOf(),
             cameraX = client.cameraX,

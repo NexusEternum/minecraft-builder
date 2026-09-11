@@ -26,6 +26,22 @@ data class LiveGameSnapshot(
     /** Local player render plane (0..3). */
     val playerPlane: Int
 ) {
+    /** Camera world tile X from this snapshot's [baseX] + [cameraX]/128. */
+    fun cameraWorldTileX(): Float = baseX + cameraX / 128f
+
+    /** Camera world tile Y from this snapshot's [baseY] + [cameraY]/128. */
+    fun cameraWorldTileY(): Float = baseY + cameraY / 128f
+
+    /** Player world tile X from this snapshot's [baseX] + [playerLocalX]/128. */
+    fun playerWorldTileX(): Float = baseX + playerLocalX / 128f
+
+    /** Player world tile Y from this snapshot's [baseY] + [playerLocalY]/128. */
+    fun playerWorldTileY(): Float = baseY + playerLocalY / 128f
+
+    /** True when scene base and regions are populated enough for mirror load. */
+    fun isSceneReady(): Boolean =
+        loggedIn && mapRegions.isNotEmpty() && (baseX != 0 || baseY != 0)
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is LiveGameSnapshot) return false

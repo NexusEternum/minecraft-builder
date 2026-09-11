@@ -1,6 +1,7 @@
 package com.lumina.game
 
 import com.lumina.plugin.LiveGameSnapshot
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
@@ -11,6 +12,49 @@ class LiveGameStateTest {
         val state = LiveGameState()
         assertNull(state.latestSnapshot())
         assertFalse(state.isRunning())
+    }
+
+    @Test
+    fun liveGameSnapshotSceneReadyRequiresRegionsAndBase() {
+        val ready = LiveGameSnapshot(
+            loggedIn = true,
+            baseX = 3161,
+            baseY = 3376,
+            plane = 0,
+            mapRegions = intArrayOf(12853),
+            cameraX = 6656,
+            cameraY = 6656,
+            cameraZ = 0,
+            cameraPitch = 0,
+            cameraYaw = 0,
+            playerLocalX = 6656,
+            playerLocalY = 6656,
+            playerPlane = 0
+        )
+        assert(ready.isSceneReady())
+        assert(!ready.copy(baseX = 0, baseY = 0).isSceneReady())
+        assert(!ready.copy(mapRegions = IntArray(0)).isSceneReady())
+    }
+
+    @Test
+    fun liveGameSnapshotWorldTileHelpers() {
+        val snapshot = LiveGameSnapshot(
+            loggedIn = true,
+            baseX = 3161,
+            baseY = 3376,
+            plane = 0,
+            mapRegions = intArrayOf(12853),
+            cameraX = 6656,
+            cameraY = 6656,
+            cameraZ = 0,
+            cameraPitch = 0,
+            cameraYaw = 0,
+            playerLocalX = 6656,
+            playerLocalY = 6656,
+            playerPlane = 0
+        )
+        assertEquals(3213f, snapshot.cameraWorldTileX(), 0.001f)
+        assertEquals(3428f, snapshot.cameraWorldTileY(), 0.001f)
     }
 
     @Test
