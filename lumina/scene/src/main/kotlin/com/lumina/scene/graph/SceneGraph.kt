@@ -12,6 +12,9 @@ class SceneGraph {
     private val entities = ConcurrentHashMap<Int, SceneNode>()
     @Volatile var dirty = true
         private set
+    /** When true, the next TLAS rebuild must not be throttled (e.g. after full scene upload). */
+    @Volatile var tlasRebuildImmediate = false
+        private set
 
     fun createNode(name: String = "node"): SceneNode {
         val id = idCounter.incrementAndGet()
@@ -36,7 +39,16 @@ class SceneGraph {
 
     fun clearDirty() { dirty = false }
 
-    fun markDirty() { dirty = true }
+    fun markDirty(immediateTlasRebuild: Boolean = false) {
+        dirty = true
+        if (immediateTlasRebuild) {
+            tlasRebuildImmediate = true
+        }
+    }
+
+    fun clearTlasRebuildImmediate() {
+        tlasRebuildImmediate = false
+    }
 
     fun clear() {
         entities.clear()

@@ -42,10 +42,18 @@ class OsrsMapLoader @Inject constructor(
         private set
 
     /**
-     * When false (default), only plane 0 terrain and objects are loaded (b15 behaviour).
-     * When true, planes 1–3 terrain (filtered) and all-plane objects are loaded for rooftops.
+     * Highest terrain plane to load (0 = ground only). Objects load on all planes regardless.
+     * OSRS-style roof hiding: when the player is on plane N, terrain for planes 0..N is shown
+     * and planes above N are excluded.
      */
-    var loadUpperPlanes: Boolean = false
+    var maxVisiblePlane: Int = 0
+
+    /** @deprecated Use [maxVisiblePlane]; kept for tests that toggled upper-plane terrain. */
+    var loadUpperPlanes: Boolean
+        get() = maxVisiblePlane > 0
+        set(value) {
+            maxVisiblePlane = if (value) PLANE_COUNT - 1 else 0
+        }
 
     fun loadRegion(cacheDir: File, regionId: Int): Boolean {
         sceneOriginBaseX = 0
@@ -61,7 +69,10 @@ class OsrsMapLoader @Inject constructor(
         cacheDir: File,
         regionIds: IntArray,
         originBaseX: Int,
-        originBaseY: Int
+        originBaseY: Int,
+        playerWorldTileX: Int = originBaseX,
+        playerWorldTileY: Int = originBaseY,
+        maxVisiblePlane: Int = this.maxVisiblePlane
     ): Boolean {
         if (regionIds.isEmpty()) {
             log.warn("No region IDs supplied for multi-region load")
@@ -74,12 +85,26 @@ class OsrsMapLoader @Inject constructor(
 
         sceneOriginBaseX = originBaseX
         sceneOriginBaseY = originBaseY
+        this.maxVisiblePlane = maxVisiblePlane.coerceIn(0, PLANE_COUNT - 1)
 
         val validRegionIds = OsrsCoordinateMapper.normalizeRegionIds(regionIds)
         if (validRegionIds.isEmpty()) {
             log.warn("No valid region IDs in {}", regionIds.contentToString())
             return false
         }
+
+        val sortedRegionIds = OsrsCoordinateMapper.sortRegionsByDistanceFromPlayer(
+            validRegionIds,
+            playerWorldTileX,
+            playerWorldTileY
+        )
+        log.info(
+            "Loading {} regions nearest-first from player tile ({}, {}), maxVisiblePlane={}",
+            sortedRegionIds.size,
+            playerWorldTileX,
+            playerWorldTileY,
+            this.maxVisiblePlane
+        )
 
         return try {
             Store(cacheDir).use { store ->
@@ -105,7 +130,7 @@ class OsrsMapLoader @Inject constructor(
                 var totalObjects = 0
                 var sceneObjectsPlaced = 0
 
-                for (regionId in validRegionIds) {
+                for (regionId in sortedRegionIds) {
                     val mapDef = try {
                         regionLoader.loadMapDef(regionId)
                     } catch (e: Exception) {
@@ -120,16 +145,28 @@ class OsrsMapLoader @Inject constructor(
                     val region = Region(regionId)
                     region.loadTerrain(mapDef)
 
-                    val locDef = try {
-                        regionLoader.loadLocDef(regionId)
-                    } catch (e: Exception) {
-                        log.debug("Location definition unavailable for region {}: {}", regionId, e.message)
+                    val xteaKey = xteaKeyManager.getKey(regionId)
+                    val locDef = if (xteaKey == null) {
+                        log.warn("No XTEA key for region {} — object locations will not decrypt", regionId)
                         null
+                    } else {
+                        try {
+                            regionLoader.loadLocDef(regionId)
+                        } catch (e: Exception) {
+                            log.warn(
+                                "Location decrypt/load failed for region {} (XTEA key present): {}",
+                                regionId,
+                                e.message
+                            )
+                            null
+                        }
                     }
                     if (locDef != null) {
                         region.loadLocations(locDef)
-                    } else {
-                        log.warn("No object locations for region {} (missing XTEA keys or loc archive)", regionId)
+                        val locationCount = region.locations?.size ?: 0
+                        log.info("Region {}: {} locations decoded", regionId, locationCount)
+                    } else if (xteaKey != null) {
+                        log.warn("No object locations for region {} (empty loc archive)", regionId)
                     }
 
                     val stats = buildScene(
@@ -162,14 +199,15 @@ class OsrsMapLoader @Inject constructor(
                 lastRegionCenterWorldZ = REGION_SIZE / 2f * TILE_SCALE
 
                 logRegionLoadSummary(
-                    validRegionIds,
+                    sortedRegionIds,
                     originBaseX,
                     originBaseY,
                     loadedCount,
                     totalTiles,
                     totalTerrainMeshes,
                     totalTerrainTriangles,
-                    totalObjects
+                    totalObjects,
+                    sceneObjectsPlaced
                 )
                 true
             }
@@ -203,12 +241,12 @@ class OsrsMapLoader @Inject constructor(
             sceneGraph.clear()
         }
 
-        if (!bridgeHandlingLogged && loadUpperPlanes) {
+        if (!bridgeHandlingLogged && maxVisiblePlane > 0) {
             log.info("Bridge tile plane shifting (tile setting 0x2) not implemented — plane 0 only for bridged tiles")
             bridgeHandlingLogged = true
         }
 
-        val locationTilesByPlane = if (loadUpperPlanes) {
+        val locationTilesByPlane = if (maxVisiblePlane > 0) {
             buildLocationTileMasks(region)
         } else {
             Array(PLANE_COUNT) { emptySet() }
@@ -216,7 +254,7 @@ class OsrsMapLoader @Inject constructor(
         var tileCount = 0
         var terrainTriangleCount = 0
         var terrainMeshCount = 0
-        val planeLimit = if (loadUpperPlanes) PLANE_COUNT else 1
+        val planeLimit = maxVisiblePlane + 1
 
         for (plane in 0 until planeLimit) {
             for (chunkX in 0 until CHUNKS_PER_AXIS) {
@@ -286,7 +324,7 @@ class OsrsMapLoader @Inject constructor(
 
         log.info(
             "Loaded OSRS region {} at origin ({}, {}): {} tiles, {} terrain meshes, {} terrain triangles, " +
-                "{} objects placed (skipped-no-model={}, skipped-type={}, deduped={})",
+                "{} objects placed (skipped-no-model={}, skipped-type={}, skipped-cap={}, deduped={})",
             regionId,
             originBaseX,
             originBaseY,
@@ -296,6 +334,7 @@ class OsrsMapLoader @Inject constructor(
             objectStats.placed,
             objectStats.skippedNoModel,
             objectStats.skippedType,
+            objectStats.skippedCap,
             objectStats.dedupedMeshes
         )
 
@@ -306,6 +345,7 @@ class OsrsMapLoader @Inject constructor(
         val placed: Int = 0,
         val skippedNoModel: Int = 0,
         val skippedType: Int = 0,
+        val skippedCap: Int = 0,
         val dedupedMeshes: Int = 0
     )
 
@@ -348,21 +388,13 @@ class OsrsMapLoader @Inject constructor(
         var placed = 0
         var skippedNoModel = 0
         var skippedType = 0
+        var skippedCap = 0
         var dedupedMeshes = 0
-        var capWarned = false
 
         for (location in locations) {
             if (sceneObjectsPlaced + placed >= MAX_SCENE_OBJECTS) {
-                if (!capWarned) {
-                    log.warn(
-                        "Scene object cap ({}) reached at region {} (placed={}, skipped remainder)",
-                        MAX_SCENE_OBJECTS,
-                        regionId,
-                        sceneObjectsPlaced + placed
-                    )
-                    capWarned = true
-                }
-                break
+                skippedCap++
+                continue
             }
 
             if (!isSupportedLocationType(location.type)) {
@@ -373,7 +405,7 @@ class OsrsMapLoader @Inject constructor(
             val position = location.position ?: continue
             val objectPlane = position.z
             if (objectPlane !in 0 until PLANE_COUNT) continue
-            if (!loadUpperPlanes && objectPlane != 0) continue
+            // Objects load on all planes (roofs/upper walls only exist where buildings are).
 
             try {
                 val objectDef = objectManager.getObject(location.id)
@@ -461,7 +493,16 @@ class OsrsMapLoader @Inject constructor(
             }
         }
 
-        return ObjectLoadStats(placed, skippedNoModel, skippedType, dedupedMeshes)
+        if (skippedCap > 0) {
+            log.warn(
+                "objects skipped due to cap: {} (region {}), scene total would be {}",
+                skippedCap,
+                regionId,
+                sceneObjectsPlaced + placed + skippedCap
+            )
+        }
+
+        return ObjectLoadStats(placed, skippedNoModel, skippedType, skippedCap, dedupedMeshes)
     }
 
     private fun loadModelDefinition(
@@ -698,9 +739,8 @@ class OsrsMapLoader @Inject constructor(
         locationTiles: Set<Long>
     ): Boolean {
         val overlayId = region.getOverlayId(plane, tileX, tileY)
-        val underlayId = region.getUnderlayId(plane, tileX, tileY)
         val hasLocation = locationTiles.contains(packRegionTile(tileX, tileY))
-        return Companion.shouldRenderUpperPlaneTile(overlayId, underlayId, hasLocation)
+        return Companion.shouldRenderUpperPlaneTile(overlayId, hasLocation)
     }
 
     private fun overlayRgb(overlay: OverlayDefinition): FloatArray? {
@@ -836,7 +876,8 @@ class OsrsMapLoader @Inject constructor(
         totalTiles: Int,
         totalTerrainMeshes: Int,
         totalTerrainTriangles: Int,
-        totalObjects: Int
+        totalObjects: Int,
+        sceneObjectsPlaced: Int
     ) {
         var minWorldX = Int.MAX_VALUE
         var minWorldY = Int.MAX_VALUE
@@ -855,7 +896,8 @@ class OsrsMapLoader @Inject constructor(
 
         log.info(
             "Loaded {} OSRS regions at scene-load origin ({}, {}): {} tiles, {} terrain meshes, " +
-                "{} terrain triangles, {} objects; region bases: [{}]; world tile AABB ({}, {})..({}, {})",
+                "{} terrain triangles, {} objects placed (cap {}/{}); region bases: [{}]; " +
+                "world tile AABB ({}, {})..({}, {})",
             loadedCount,
             originBaseX,
             originBaseY,
@@ -863,6 +905,8 @@ class OsrsMapLoader @Inject constructor(
             totalTerrainMeshes,
             totalTerrainTriangles,
             totalObjects,
+            sceneObjectsPlaced,
+            MAX_SCENE_OBJECTS,
             regionBases,
             minWorldX,
             minWorldY,
@@ -896,11 +940,22 @@ class OsrsMapLoader @Inject constructor(
             return floatArrayOf(r, g, b)
         }
 
-        /** Upper-plane terrain: render when overlay, underlay, or a location exists on the tile. */
+        /**
+         * Upper-plane terrain: render when overlay != 0 or a location exists on the tile.
+         * Underlay alone is excluded — b16 used underlay != 0 and blanketed the entire world
+         * with invisible height sheets because every upper plane tile has a copied underlay id.
+         */
+        fun shouldRenderUpperPlaneTile(
+            overlayId: Int,
+            hasLocation: Boolean
+        ): Boolean = overlayId != 0 || hasLocation
+
+        /** @deprecated b16 filter; underlay-only tiles are intentionally excluded. */
+        @Deprecated("Underlay-only upper tiles blanket the world; use two-arg overload")
         fun shouldRenderUpperPlaneTile(
             overlayId: Int,
             underlayId: Int,
             hasLocation: Boolean
-        ): Boolean = overlayId != 0 || underlayId != 0 || hasLocation
+        ): Boolean = shouldRenderUpperPlaneTile(overlayId, hasLocation)
     }
 }

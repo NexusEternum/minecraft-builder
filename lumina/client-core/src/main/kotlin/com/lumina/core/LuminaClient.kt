@@ -56,6 +56,9 @@ class LuminaClient(private val args: Array<String>) {
     private var loadedRegionsKey: String? = null
     private var pendingRegionsKey: String? = null
     private var pendingRegionsStablePolls = 0
+    private var loadedMaxVisiblePlane = 0
+    private var pendingMaxVisiblePlane: Int? = null
+    private var pendingPlaneStablePolls = 0
     private var playerMarkerNodeId: Int? = null
     private var lastPlayerMarkerX = Float.NaN
     private var lastPlayerMarkerY = Float.NaN
@@ -308,21 +311,32 @@ class LuminaClient(private val args: Array<String>) {
         }
 
         val cacheDir = resolveCacheDir()
+        val playerWorldTileX = snapshot.playerWorldTileX().toInt()
+        val playerWorldTileY = snapshot.playerWorldTileY().toInt()
+        val maxVisiblePlane = snapshot.playerPlane.coerceIn(0, 3)
         log.info(
-            "--play: loading {} regions from {} with origin ({}, {})",
+            "--play: loading {} regions from {} with origin ({}, {}), player tile=({}, {}), maxVisiblePlane={}",
             snapshot.mapRegions.size,
             cacheDir.absolutePath,
             snapshot.baseX,
-            snapshot.baseY
+            snapshot.baseY,
+            playerWorldTileX,
+            playerWorldTileY,
+            maxVisiblePlane
         )
 
+        val loadStartNs = System.nanoTime()
         val loaded = osrsMapLoader.loadRegions(
             cacheDir,
             snapshot.mapRegions,
             snapshot.baseX,
-            snapshot.baseY
+            snapshot.baseY,
+            playerWorldTileX,
+            playerWorldTileY,
+            maxVisiblePlane
         )
         if (!loaded) return false
+        val loadMs = (System.nanoTime() - loadStartNs) / 1_000_000
 
         setupPlayerMarker()
 
@@ -336,10 +350,21 @@ class LuminaClient(private val args: Array<String>) {
             snapshot.baseY
         )
         loadedRegionsKey = OsrsCoordinateMapper.mapRegionsKey(snapshot.mapRegions)
+        loadedMaxVisiblePlane = maxVisiblePlane
         pendingRegionsKey = null
         pendingRegionsStablePolls = 0
+        pendingMaxVisiblePlane = null
+        pendingPlaneStablePolls = 0
 
+        val uploadStartNs = System.nanoTime()
         sceneBufferManager.uploadSceneData()
+        val uploadMs = (System.nanoTime() - uploadStartNs) / 1_000_000
+        log.info(
+            "--play: scene rebuild timings — map load {} ms, GPU upload {} ms (total {} ms)",
+            loadMs,
+            uploadMs,
+            loadMs + uploadMs
+        )
         return true
     }
 
@@ -403,22 +428,47 @@ class LuminaClient(private val args: Array<String>) {
 
     private fun maybeRebuildLiveScene(snapshot: LiveGameSnapshot) {
         val regionsKey = OsrsCoordinateMapper.mapRegionsKey(snapshot.mapRegions)
-        if (regionsKey == loadedRegionsKey) {
+        val maxVisiblePlane = snapshot.playerPlane.coerceIn(0, 3)
+        val regionsChanged = regionsKey != loadedRegionsKey
+        val planeChanged = maxVisiblePlane != loadedMaxVisiblePlane
+
+        if (!regionsChanged && !planeChanged) {
             pendingRegionsKey = null
             pendingRegionsStablePolls = 0
+            pendingMaxVisiblePlane = null
+            pendingPlaneStablePolls = 0
             return
         }
 
-        if (regionsKey != pendingRegionsKey) {
-            pendingRegionsKey = regionsKey
+        val pendingKey = when {
+            regionsChanged -> regionsKey
+            else -> pendingRegionsKey ?: loadedRegionsKey
+        }
+        val pendingPlane = when {
+            planeChanged -> maxVisiblePlane
+            else -> pendingMaxVisiblePlane ?: loadedMaxVisiblePlane
+        }
+
+        if (pendingKey != pendingRegionsKey || pendingPlane != pendingMaxVisiblePlane) {
+            pendingRegionsKey = pendingKey
+            pendingMaxVisiblePlane = pendingPlane
             pendingRegionsStablePolls = 1
+            pendingPlaneStablePolls = 1
             return
         }
 
         pendingRegionsStablePolls++
+        pendingPlaneStablePolls++
         if (pendingRegionsStablePolls < REGION_CHANGE_STABLE_POLLS) return
+        if (pendingPlaneStablePolls < PLANE_CHANGE_STABLE_POLLS) return
 
-        log.info("--play: map regions changed ({} -> {}), rebuilding scene", loadedRegionsKey, regionsKey)
+        log.info(
+            "--play: scene visibility changed (regions {} -> {}, plane {} -> {}), rebuilding scene",
+            loadedRegionsKey,
+            regionsKey,
+            loadedMaxVisiblePlane,
+            maxVisiblePlane
+        )
         if (reloadLiveScene(snapshot)) {
             syncCameraFromSnapshot(snapshot)
         }
@@ -543,6 +593,8 @@ class LuminaClient(private val args: Array<String>) {
         private const val DEFAULT_OSRS_REGION_ID = 12850
         /** Debounce region rebuild until the new set is stable for this many live polls. */
         private const val REGION_CHANGE_STABLE_POLLS = 2
+        /** Debounce plane visibility rebuild until the new plane is stable for this many live polls. */
+        private const val PLANE_CHANGE_STABLE_POLLS = 2
         /** Scene base must match for this many consecutive polls before mirror load. */
         private const val STABLE_SCENE_POLLS = 2
         /** Matches [com.lumina.game.LiveGameState.POLL_INTERVAL_MS]. */

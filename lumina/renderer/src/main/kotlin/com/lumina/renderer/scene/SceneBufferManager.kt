@@ -34,14 +34,47 @@ class SceneBufferManager @Inject constructor(
     var instanceRecords: List<SceneInstanceRecord> = emptyList()
         private set
 
-    private var uploadedInstanceCount = 0
+    /**
+     * Returns [instanceRecords] for TLAS rebuild after validating they still match the scene graph.
+     * A count mismatch means a partial/stale list — caller must not rebuild TLAS from it.
+     */
+    fun instancesForTlasRebuild(): List<SceneInstanceRecord>? {
+        val meshNodes = sceneGraph.nodesWithComponent(MeshComponent::class.java)
+        val records = instanceRecords
+        if (records.isEmpty()) {
+            if (meshNodes.isNotEmpty()) {
+                log.error(
+                    "TLAS rebuild blocked: {} mesh nodes but instanceRecords empty (upload incomplete?)",
+                    meshNodes.size
+                )
+            }
+            return null
+        }
+        if (records.size != meshNodes.size) {
+            log.error(
+                "TLAS rebuild blocked: instanceRecords={} vs meshNodes={} — lists must match after upload",
+                records.size,
+                meshNodes.size
+            )
+            return null
+        }
+        return records
+    }
 
     fun uploadSceneData() {
+        val uploadStartNs = System.nanoTime()
         val meshNodes = sceneGraph.nodesWithComponent(MeshComponent::class.java)
-        if (meshNodes.isEmpty()) return
+        if (meshNodes.isEmpty()) {
+            log.warn("uploadSceneData: scene has no mesh nodes")
+            return
+        }
 
         destroyBuffers()
+        // TODO: content-key BLAS cache (modelId+orientation) across scene reloads requires persisting
+        // GPU vertex/index buffers for unchanged meshes; clearBlasCache() forces full BLAS rebuild today.
+        val blasClearStartNs = System.nanoTime()
         accelStructure.clearBlasCache()
+        val blasClearMs = (System.nanoTime() - blasClearStartNs) / 1_000_000
 
         if (meshNodes.size >= INSTANCE_WARN_THRESHOLD) {
             log.warn(
@@ -173,6 +206,7 @@ class SceneBufferManager @Inject constructor(
         VulkanMemory.uploadBuffer(ctx, instanceInfoBuf, instanceInfoData)
 
         val records = ArrayList<SceneInstanceRecord>(pendingInstances.size)
+        val blasBuildStartNs = System.nanoTime()
         for (pending in pendingInstances) {
             val blasId = accelStructure.buildBLAS(
                 pending.slot.mesh,
@@ -206,6 +240,8 @@ class SceneBufferManager @Inject constructor(
             )
         }
 
+        val blasBuildMs = (System.nanoTime() - blasBuildStartNs) / 1_000_000
+
         MemoryUtil.memFree(vertData)
         MemoryUtil.memFree(idxData)
         MemoryUtil.memFree(matData)
@@ -216,14 +252,29 @@ class SceneBufferManager @Inject constructor(
         materialBuffer = matBuf
         instanceInfoBuffer = instanceInfoBuf
         instanceRecords = records
-        uploadedInstanceCount = records.size
+        sceneGraph.markDirty(immediateTlasRebuild = true)
+
+        val uploadMs = (System.nanoTime() - uploadStartNs) / 1_000_000
+        if (records.size != instanceCount) {
+            log.error(
+                "Upload instance mismatch: {} mesh nodes, {} TLAS records ({} BLAS failures) — " +
+                    "some objects will not render until re-upload",
+                instanceCount,
+                records.size,
+                instanceCount - records.size
+            )
+        }
 
         log.info(
-            "Uploaded scene: {} TLAS instances, {} unique meshes, {} vertices, {} indices",
+            "Uploaded scene: {} TLAS instances, {} unique meshes, {} vertices, {} indices " +
+                "(upload {} ms, BLAS clear {} ms, BLAS build {} ms)",
             records.size,
             uniqueMeshes.size,
             uploadVertexOffset,
-            totalIndices
+            totalIndices,
+            uploadMs,
+            blasClearMs,
+            blasBuildMs
         )
     }
 

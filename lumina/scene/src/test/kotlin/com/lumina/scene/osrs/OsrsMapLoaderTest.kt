@@ -5,8 +5,8 @@ import com.lumina.scene.graph.MeshComponent
 import com.lumina.scene.graph.SceneGraph
 import com.lumina.scene.graph.Transform
 import net.runelite.cache.models.JagexColor
+import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -73,14 +73,27 @@ class OsrsMapLoaderTest {
     fun loadUpperPlanesDefaultsFalse() {
         val loader = OsrsMapLoader(SceneGraph(), XteaKeyService())
         assertFalse(loader.loadUpperPlanes)
+        assertEquals(0, loader.maxVisiblePlane)
     }
 
     @Test
-    fun upperPlaneTileFilterRequiresOverlayUnderlayOrLocation() {
-        assertTrue(OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 1, underlayId = 0, hasLocation = false))
-        assertTrue(OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 0, underlayId = 2, hasLocation = false))
-        assertTrue(OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 0, underlayId = 0, hasLocation = true))
-        assertFalse(OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 0, underlayId = 0, hasLocation = false))
+    fun upperPlaneTileFilterRequiresOverlayOrLocationNotUnderlayAlone() {
+        assertTrue(OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 1, hasLocation = false))
+        assertFalse(OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 0, hasLocation = false))
+        assertTrue(OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 0, hasLocation = true))
+        // b16 regression: underlay-only must not render upper terrain sheets
+        assertFalse(
+            OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 0, underlayId = 2, hasLocation = false)
+        )
+    }
+
+    @Test
+    fun visiblePlanesForPlayerIncludesBelowAndCurrentExcludesAbove() {
+        assertArrayEquals(intArrayOf(0), OsrsCoordinateMapper.visiblePlanesForPlayer(0))
+        assertArrayEquals(intArrayOf(0, 1), OsrsCoordinateMapper.visiblePlanesForPlayer(1))
+        assertArrayEquals(intArrayOf(0, 1, 2), OsrsCoordinateMapper.visiblePlanesForPlayer(2))
+        assertArrayEquals(intArrayOf(0, 1, 2, 3), OsrsCoordinateMapper.visiblePlanesForPlayer(3))
+        assertArrayEquals(intArrayOf(0, 1, 2, 3), OsrsCoordinateMapper.visiblePlanesForPlayer(99))
     }
 
     @Test

@@ -338,4 +338,27 @@ class OsrsCoordinateMapperTest {
         assertEquals(8f * OsrsMapLoader.TILE_SCALE, correct.x - wrong.x, 0.01f)
         assertEquals(8f * OsrsMapLoader.TILE_SCALE, wrong.z - correct.z, 0.01f)
     }
+
+    @Test
+    fun sortRegionsByDistanceFromPlayerOrdersNearestFirst() {
+        // Player at Varrock centre (~3218, 3404) — region 12850 is SW of centre, 12851 SE, etc.
+        val playerX = 3218
+        val playerY = 3404
+        val unsorted = intArrayOf(12853, 12850, 12851, 12852)
+        val sorted = OsrsCoordinateMapper.sortRegionsByDistanceFromPlayer(unsorted, playerX, playerY)
+        assertEquals(4, sorted.size)
+        // Nearest region should be first; farthest last
+        val distances = sorted.map { regionId ->
+            val (baseX, baseY) = OsrsCoordinateMapper.regionOriginTiles(regionId)
+            val dx = baseX + 32 - playerX
+            val dy = baseY + 32 - playerY
+            dx * dx + dy * dy
+        }
+        for (i in 0 until distances.size - 1) {
+            assertTrue(
+                distances[i] <= distances[i + 1],
+                "regions must be nearest-first: $sorted distances=$distances"
+            )
+        }
+    }
 }

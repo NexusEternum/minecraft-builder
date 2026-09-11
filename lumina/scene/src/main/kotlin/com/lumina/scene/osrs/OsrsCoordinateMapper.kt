@@ -264,6 +264,37 @@ object OsrsCoordinateMapper {
     fun mapRegionsKey(mapRegions: IntArray): String =
         normalizeRegionIds(mapRegions).sorted().joinToString(",")
 
+    /**
+     * Sort region IDs nearest-first from the player's world tile so object budget caps
+     * prefer geometry closest to the player.
+     */
+    fun sortRegionsByDistanceFromPlayer(
+        regionIds: IntArray,
+        playerWorldTileX: Int,
+        playerWorldTileY: Int
+    ): IntArray {
+        if (regionIds.size <= 1) return regionIds.copyOf()
+        return regionIds
+            .sortedBy { regionId ->
+                val (baseX, baseY) = regionOriginTiles(regionId)
+                val centerX = baseX + REGION_TILES / 2
+                val centerY = baseY + REGION_TILES / 2
+                val dx = centerX - playerWorldTileX
+                val dy = centerY - playerWorldTileY
+                dx * dx + dy * dy
+            }
+            .toIntArray()
+    }
+
+    /** Planes 0..[playerPlane] are visible; planes above are hidden (OSRS roof culling). */
+    fun visiblePlanesForPlayer(playerPlane: Int): IntArray {
+        val clamped = playerPlane.coerceIn(0, PLANE_COUNT - 1)
+        return IntArray(clamped + 1) { it }
+    }
+
+    private const val REGION_TILES = 64
+    private const val PLANE_COUNT = 4
+
     private fun normalizeTriple(x: Float, y: Float, z: Float): Triple<Float, Float, Float> {
         val len = sqrt(x * x + y * y + z * z)
         if (len <= 1e-6f) return Triple(0f, 0f, -1f)

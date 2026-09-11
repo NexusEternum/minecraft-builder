@@ -191,24 +191,31 @@ class AccelerationStructureManager @Inject constructor(
             )
         }
 
+        // Resolve BLAS handles first — abort rather than build a partial TLAS that drops geometry.
+        val resolved = ArrayList<Pair<SceneInstanceRecord, BLASEntry>>(instances.size)
+        for (record in instances) {
+            val blas = blasCache.values.firstOrNull { it.handle == record.blasId }
+            if (blas == null) {
+                log.error(
+                    "TLAS rebuild aborted: instance[{}] {} — BLAS handle {} missing ({} of {} instances); " +
+                        "keeping previous TLAS to avoid dropping objects",
+                    record.instanceIndex,
+                    record.nodeName,
+                    record.blasId,
+                    resolved.size,
+                    instances.size
+                )
+                return
+            }
+            resolved.add(record to blas)
+        }
+
         MemoryStack.stackPush().use { stack ->
-            val instanceSize = 64L * instances.size
+            val instanceSize = 64L * resolved.size
             val instanceData = MemoryUtil.memAlloc(instanceSize.toInt())
 
-            var built = 0
-            for (record in instances) {
-                val blas = blasCache.values.firstOrNull { it.handle == record.blasId }
-                if (blas == null) {
-                    log.warn(
-                        "TLAS skip instance[{}] {} — BLAS handle {} missing (stale upload?)",
-                        record.instanceIndex,
-                        record.nodeName,
-                        record.blasId
-                    )
-                    continue
-                }
-
-                val i = built
+            for ((i, pair) in resolved.withIndex()) {
+                val (record, blas) = pair
                 val offset = i * 64
                 val xform = record.transform
 
@@ -229,11 +236,12 @@ class AccelerationStructureManager @Inject constructor(
                 val customIndex = record.instanceIndex
                 if (customIndex >= com.lumina.renderer.scene.SceneBufferManager.MAX_TLAS_INSTANCES) {
                     log.error(
-                        "Instance index {} exceeds 24-bit customIndex limit; skipping {}",
+                        "TLAS rebuild aborted: instance index {} exceeds 24-bit customIndex limit for {}",
                         customIndex,
                         record.nodeName
                     )
-                    continue
+                    MemoryUtil.memFree(instanceData)
+                    return
                 }
                 instanceData.putInt(offset + 48, customIndex or (0xFF shl 24))
                 instanceData.putInt(offset + 52, 0)
@@ -247,9 +255,9 @@ class AccelerationStructureManager @Inject constructor(
                     record.blasId,
                     record.indexTriBase
                 )
-                built++
             }
 
+            val built = resolved.size
             if (built == 0) return
 
             val instBuf = VulkanMemory.createBuffer(

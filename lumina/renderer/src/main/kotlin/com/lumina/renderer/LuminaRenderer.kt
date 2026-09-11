@@ -43,6 +43,13 @@ class LuminaRenderer @Inject constructor(
         private set
     private var lastFrameNanos: Long = 0
     private var descriptorsDirty = true
+    private var lastTlasRebuildNanos: Long = 0L
+
+    companion object {
+        private const val RT_SHADER_STAGE = 0x00200000 // VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+        /** Minimum interval between marker-driven TLAS rebuilds (full uploads bypass via tlasRebuildImmediate). */
+        private const val TLAS_REBUILD_MIN_INTERVAL_NS = 100_000_000L
+    }
 
     fun init(title: String = "Lumina - OSRS", width: Int = 1280, height: Int = 720) {
         vkContext.init(title, width, height)
@@ -119,9 +126,23 @@ class LuminaRenderer @Inject constructor(
         lastFrameNanos = now
 
         if (sceneGraph.dirty) {
-            accelStructure.rebuildTLAS(sceneBufferManager.instanceRecords)
-            sceneGraph.clearDirty()
-            descriptorsDirty = true
+            val nowNs = System.nanoTime()
+            val immediate = sceneGraph.tlasRebuildImmediate
+            if (immediate || nowNs - lastTlasRebuildNanos >= TLAS_REBUILD_MIN_INTERVAL_NS) {
+                val instances = sceneBufferManager.instancesForTlasRebuild()
+                if (instances != null) {
+                    accelStructure.rebuildTLAS(instances)
+                    lastTlasRebuildNanos = nowNs
+                    descriptorsDirty = true
+                    sceneGraph.clearDirty()
+                    sceneGraph.clearTlasRebuildImmediate()
+                } else if (!immediate) {
+                    sceneGraph.clearDirty()
+                    sceneGraph.clearTlasRebuildImmediate()
+                }
+            }
+        } else if (sceneGraph.tlasRebuildImmediate) {
+            sceneGraph.clearTlasRebuildImmediate()
         }
 
         updateAllDescriptors()
@@ -341,9 +362,5 @@ class LuminaRenderer @Inject constructor(
         frameManager.destroy()
         vkContext.destroy()
         log.info("Lumina renderer destroyed after {} frames", frameCount)
-    }
-
-    companion object {
-        private const val RT_SHADER_STAGE = 0x00200000 // VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
     }
 }
