@@ -69,7 +69,8 @@ class LuminaRenderer @Inject constructor(
             renderTargets, rtPipeline.getCameraBuffer(),
             sceneBufferManager.vertexBuffer,
             sceneBufferManager.indexBuffer,
-            sceneBufferManager.materialBuffer
+            sceneBufferManager.materialBuffer,
+            sceneBufferManager.instanceInfoBuffer
         )
 
         val rtOutput = renderTargets.rtOutputColor ?: return

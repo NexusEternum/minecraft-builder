@@ -26,6 +26,7 @@ class SceneBufferManager @Inject constructor(
     var vertexBuffer: VulkanBuffer? = null; private set
     var indexBuffer: VulkanBuffer? = null; private set
     var materialBuffer: VulkanBuffer? = null; private set
+    var instanceInfoBuffer: VulkanBuffer? = null; private set
 
     private var uploadedMeshCount = 0
 
@@ -48,6 +49,7 @@ class SceneBufferManager @Inject constructor(
         val vertexSize = totalVertexFloats.toLong() * 4
         val indexSize = totalIndices.toLong() * 4
         val matSize = meshNodes.size.toLong() * 32 // 8 floats (2 vec4s) per material
+        val instanceInfoSize = meshNodes.size.toLong() * 4 // one uint indexTriBase per mesh
 
         val vertBuf = VulkanMemory.createBuffer(ctx, vertexSize,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT or VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR or
@@ -63,9 +65,14 @@ class SceneBufferManager @Inject constructor(
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
 
+        val instanceInfoBuf = VulkanMemory.createBuffer(ctx, instanceInfoSize,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+
         val vertData = MemoryUtil.memAlloc(vertexSize.toInt())
         val idxData = MemoryUtil.memAlloc(indexSize.toInt())
         val matData = MemoryUtil.memAlloc(matSize.toInt())
+        val instanceInfoData = MemoryUtil.memAlloc(instanceInfoSize.toInt())
 
         var vertexOffset = 0 // in vertices (not floats)
         var indexOffset = 0  // in indices
@@ -98,25 +105,33 @@ class SceneBufferManager @Inject constructor(
         idxData.flip()
         matData.flip()
 
-        // Upload all data to GPU BEFORE building BLAS
+        // Upload geometry and materials to GPU before building BLAS
         VulkanMemory.uploadBuffer(ctx, vertBuf, vertData)
         VulkanMemory.uploadBuffer(ctx, idxBuf, idxData)
         VulkanMemory.uploadBuffer(ctx, matBuf, matData)
-
-        // Build BLAS after data is on the GPU
-        // Vertex offset = 0 because indices are global (already offset to combined buffer)
-        // Index offset = per-mesh byte offset into the combined index buffer
-        for (info in meshInfos) {
-            accelStructure.buildBLAS(info.mesh, vertBuf.buffer, idxBuf.buffer, 0, info.idxByteOffset, info.indexTriBase, vertexOffset)
-        }
 
         MemoryUtil.memFree(vertData)
         MemoryUtil.memFree(idxData)
         MemoryUtil.memFree(matData)
 
+        // Build BLAS after data is on the GPU
+        for (info in meshInfos) {
+            accelStructure.buildBLAS(info.mesh, vertBuf.buffer, idxBuf.buffer, 0, info.idxByteOffset, info.indexTriBase, vertexOffset)
+        }
+
+        // Per-mesh indexTriBase for closest-hit shader (uses BLAS entry when geometry is deduplicated)
+        for (info in meshInfos) {
+            val indexTriBase = accelStructure.getIndexTriBase(info.mesh.blasId)
+            instanceInfoData.putInt(indexTriBase)
+        }
+        instanceInfoData.flip()
+        VulkanMemory.uploadBuffer(ctx, instanceInfoBuf, instanceInfoData)
+        MemoryUtil.memFree(instanceInfoData)
+
         vertexBuffer = vertBuf
         indexBuffer = idxBuf
         materialBuffer = matBuf
+        instanceInfoBuffer = instanceInfoBuf
         uploadedMeshCount = meshIdx
 
         log.info("Uploaded scene: {} meshes, {} vertices, {} indices", meshIdx, vertexOffset, indexOffset)
@@ -126,7 +141,8 @@ class SceneBufferManager @Inject constructor(
         vertexBuffer?.let { VulkanMemory.destroyBuffer(ctx, it) }
         indexBuffer?.let { VulkanMemory.destroyBuffer(ctx, it) }
         materialBuffer?.let { VulkanMemory.destroyBuffer(ctx, it) }
-        vertexBuffer = null; indexBuffer = null; materialBuffer = null
+        instanceInfoBuffer?.let { VulkanMemory.destroyBuffer(ctx, it) }
+        vertexBuffer = null; indexBuffer = null; materialBuffer = null; instanceInfoBuffer = null
     }
 
     fun destroy() {

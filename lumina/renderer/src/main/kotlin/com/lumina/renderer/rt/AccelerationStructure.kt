@@ -207,8 +207,8 @@ class AccelerationStructureManager @Inject constructor(
                 instanceData.putFloat(offset + 40, xform.scaleZ)
                 instanceData.putFloat(offset + 44, xform.z)
 
-                // instanceCustomIndex:24 (lower 12 = material index, upper 12 = index tri base), mask:8
-                val customIndex = (i and 0xFFF) or ((blas.indexTriBase and 0xFFF) shl 12)
+                // instanceCustomIndex:24 = material/mesh index only (indexTriBase lives in SSBO binding 8)
+                val customIndex = i and 0xFFFFFF
                 instanceData.putInt(offset + 48, customIndex or (0xFF shl 24))
                 // instanceShaderBindingTableRecordOffset:24, flags:8
                 instanceData.putInt(offset + 52, 0)
@@ -304,6 +304,8 @@ class AccelerationStructureManager @Inject constructor(
 
     fun getTLASHandle(): Long = tlasAccelStruct
     fun getBLASCount(): Int = blasCache.size
+
+    fun getIndexTriBase(blasId: Int): Int = blasCache[blasId]?.indexTriBase ?: 0
 
     private fun getBufferAddress(dev: VkDevice, buffer: Long): Long {
         MemoryStack.stackPush().use { stack ->

@@ -23,6 +23,7 @@ import com.lumina.renderer.vulkan.VulkanContext
 import com.lumina.scene.extract.OsrsSceneExtractor
 import com.lumina.scene.graph.SceneGraph
 import com.lumina.scene.model.ModelPackManager
+import com.lumina.scene.osrs.OsrsMapLoader
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -58,6 +59,7 @@ class LuminaModule(
         bind(DemoScene::class.java).asEagerSingleton()
         bind(SceneBufferManager::class.java).asEagerSingleton()
         bind(OsrsSceneExtractor::class.java).asEagerSingleton()
+        bind(OsrsMapLoader::class.java).asEagerSingleton()
         bind(ModelPackManager::class.java).asEagerSingleton()
         bind(ConfigManager::class.java).asEagerSingleton()
         bind(com.lumina.core.game.JagexAuthManager::class.java).asEagerSingleton()

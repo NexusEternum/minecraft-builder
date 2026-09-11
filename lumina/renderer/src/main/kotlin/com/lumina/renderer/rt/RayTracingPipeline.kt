@@ -53,7 +53,7 @@ class RayTracingPipeline @Inject constructor(
     private fun createDescriptorSetLayout() {
         val dev = ctx.device!!
         MemoryStack.stackPush().use { stack ->
-            val bindings = VkDescriptorSetLayoutBinding.calloc(8, stack)
+            val bindings = VkDescriptorSetLayoutBinding.calloc(9, stack)
 
             // Binding 0: TLAS
             bindings.get(0)
@@ -104,6 +104,12 @@ class RayTracingPipeline @Inject constructor(
                 .descriptorCount(1)
                 .stageFlags(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR)
 
+            // Binding 8: Per-instance indexTriBase SSBO
+            bindings.get(8).binding(8)
+                .descriptorType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                .descriptorCount(1)
+                .stageFlags(VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR)
+
             val layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
                 .pBindings(bindings)
@@ -130,7 +136,7 @@ class RayTracingPipeline @Inject constructor(
             poolSizes.get(0).type(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR).descriptorCount(1)
             poolSizes.get(1).type(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE).descriptorCount(3)
             poolSizes.get(2).type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(1)
-            poolSizes.get(3).type(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(3)
+            poolSizes.get(3).type(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER).descriptorCount(4)
 
             val poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO)
@@ -319,7 +325,7 @@ class RayTracingPipeline @Inject constructor(
 
     fun updateDescriptors(renderTargets: RenderTargets, cameraUbo: VulkanBuffer? = null,
                           vertexBuffer: VulkanBuffer? = null, indexBuffer: VulkanBuffer? = null,
-                          materialBuffer: VulkanBuffer? = null) {
+                          materialBuffer: VulkanBuffer? = null, instanceInfoBuffer: VulkanBuffer? = null) {
         if (!ctx.rtSupported || descriptorSet == 0L) return
         val dev = ctx.device!!
         val rt = renderTargets
@@ -374,11 +380,12 @@ class RayTracingPipeline @Inject constructor(
                 vkUpdateDescriptorSets(dev, write, null)
             }
 
-            // Bindings 5-7: SSBOs
+            // Bindings 5-8: SSBOs
             val bufferBindings = listOf(
                 5 to vertexBuffer,
                 6 to indexBuffer,
-                7 to materialBuffer
+                7 to materialBuffer,
+                8 to instanceInfoBuffer
             )
             for ((binding, buffer) in bufferBindings) {
                 if (buffer != null) {

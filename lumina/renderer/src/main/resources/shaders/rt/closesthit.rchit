@@ -22,6 +22,9 @@ layout(binding = 6, set = 0, scalar) buffer IndexBuffer { uint indices[]; };
 layout(binding = 7, set = 0, scalar) buffer MaterialBuffer {
     vec4 materialData[];
 };
+layout(binding = 8, set = 0, scalar) buffer InstanceInfoBuffer {
+    uint instanceInfo[];
+};
 
 hitAttributeEXT vec2 attribs;
 
@@ -125,9 +128,8 @@ vec3 evaluatePBR(vec3 N, vec3 V, vec3 L, vec3 albedo, float roughness, float met
 }
 
 void main() {
-    uint customIndex = gl_InstanceCustomIndexEXT;
-    uint matIdx = customIndex & 0xFFFu;
-    uint indexTriBase = (customIndex >> 12u) & 0xFFFu;
+    uint matIdx = gl_InstanceCustomIndexEXT & 0xFFFFFFu;
+    uint indexTriBase = instanceInfo[matIdx];
 
     uint triIndex = indexTriBase + gl_PrimitiveID;
     uint i0 = indices[triIndex * 3u];

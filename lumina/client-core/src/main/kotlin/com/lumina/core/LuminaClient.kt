@@ -13,6 +13,7 @@ import com.lumina.renderer.overlay.OverlayRenderer
 import com.lumina.renderer.scene.DemoScene
 import com.lumina.renderer.scene.SceneBufferManager
 import com.lumina.scene.graph.SceneGraph
+import com.lumina.scene.osrs.OsrsMapLoader
 import org.lwjgl.glfw.GLFW.*
 import org.lwjgl.glfw.GLFWCursorPosCallbackI
 import org.lwjgl.glfw.GLFWFramebufferSizeCallbackI
@@ -31,6 +32,7 @@ class LuminaClient(private val args: Array<String>) {
     private lateinit var sceneBufferManager: SceneBufferManager
     private lateinit var overlay: OverlayRenderer
     private lateinit var demoScene: DemoScene
+    private lateinit var osrsMapLoader: OsrsMapLoader
     @Volatile private var running = false
     private var resizeRequested = false
     private var newWidth = 0
@@ -52,6 +54,7 @@ class LuminaClient(private val args: Array<String>) {
         sceneBufferManager = injector.getInstance(SceneBufferManager::class.java)
         overlay = injector.getInstance(OverlayRenderer::class.java)
         demoScene = injector.getInstance(DemoScene::class.java)
+        osrsMapLoader = injector.getInstance(OsrsMapLoader::class.java)
 
         val ipc = injector.getInstance(JagexLauncherIPC::class.java)
         ipc.initialize(args)
@@ -67,14 +70,31 @@ class LuminaClient(private val args: Array<String>) {
         renderer.init("Lumina - Old School RuneScape", 1920, 1080)
         setupCallbacks()
 
-        // Generate and upload demo scene so the path tracer has geometry
-        demoScene.generate()
-        sceneBufferManager.uploadSceneData()
-        log.info("Demo scene loaded and uploaded to GPU")
+        // Generate and upload scene so the path tracer has geometry
+        val osrsRegionId = parseOsrsRegionId()
+        val osrsLoaded = if (osrsRegionId >= 0) {
+            val cacheDir = resolveCacheDir()
+            log.info("Loading OSRS region {} from cache: {}", osrsRegionId, cacheDir.absolutePath)
+            osrsMapLoader.loadRegion(cacheDir, osrsRegionId)
+        } else {
+            false
+        }
 
-        // Position camera to view the scene (yaw=0 looks toward -Z, pitch<0 looks down)
-        camera.setPosition(0f, 8f, 20f)
-        camera.setRotation(-0.3f, 0f)
+        if (osrsLoaded) {
+            sceneBufferManager.uploadSceneData()
+            log.info("OSRS terrain loaded and uploaded to GPU")
+            camera.setPosition(81f, 30f, 81f)
+            camera.setRotation(-0.5f, 0f)
+        } else {
+            if (osrsRegionId >= 0) {
+                log.warn("OSRS terrain load failed; falling back to demo scene")
+            }
+            demoScene.generate()
+            sceneBufferManager.uploadSceneData()
+            log.info("Demo scene loaded and uploaded to GPU")
+            camera.setPosition(0f, 8f, 20f)
+            camera.setRotation(-0.3f, 0f)
+        }
 
         val developerMode = "--developer-mode" in args || "--demo" in args
         pluginManager = PluginManager(injector, developerMode)
@@ -96,6 +116,36 @@ class LuminaClient(private val args: Array<String>) {
 
         running = true
         mainLoop()
+    }
+
+    private fun parseOsrsRegionId(): Int {
+        val index = args.indexOf("--osrs")
+        if (index < 0) return -1
+        val next = args.getOrNull(index + 1)?.toIntOrNull()
+        return next ?: DEFAULT_OSRS_REGION_ID
+    }
+
+    private fun resolveCacheDir(): File {
+        System.getProperty("lumina.cache")?.let { path ->
+            val dir = File(path)
+            log.info("Using OSRS cache from lumina.cache system property: {}", dir.absolutePath)
+            return dir
+        }
+
+        val home = File(System.getProperty("user.home"))
+        val jagexCache = File(home, "jagexcache/oldschool/LIVE")
+        if (jagexCache.isDirectory) {
+            log.info("Using OSRS cache from Jagex launcher path: {}", jagexCache.absolutePath)
+            return jagexCache
+        }
+
+        val runeliteCache = File(home, ".runelite/jagexcache/oldschool/LIVE")
+        log.info("Using OSRS cache from RuneLite path: {}", runeliteCache.absolutePath)
+        return runeliteCache
+    }
+
+    companion object {
+        private const val DEFAULT_OSRS_REGION_ID = 12850
     }
 
     private fun printControls() {
