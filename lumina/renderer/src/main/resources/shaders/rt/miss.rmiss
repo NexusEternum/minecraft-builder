@@ -45,7 +45,7 @@ vec3 proceduralSky(vec3 dir) {
 
     // Ground
     if (dir.y < 0.0) {
-        skyColor = mix(vec3(0.1, 0.08, 0.06), horizonColor, exp(dir.y * 20.0));
+        skyColor = mix(horizonColor * 0.4, horizonColor, exp(dir.y * 20.0));
     }
 
     return (skyColor + sunGlow) * 0.6 + vec3(sunSize);
