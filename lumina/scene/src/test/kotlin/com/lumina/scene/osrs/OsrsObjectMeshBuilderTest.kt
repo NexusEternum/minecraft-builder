@@ -1,0 +1,227 @@
+package com.lumina.scene.osrs
+
+import net.runelite.cache.definitions.ModelDefinition
+import net.runelite.cache.models.JagexColor
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+class OsrsObjectMeshBuilderTest {
+    @Test
+    fun applyRecolorReplacesExactHslMatch() {
+        val original = JagexColor.packHSL(0, 6, 50).toInt()
+        val replacement = JagexColor.packHSL(20, 6, 50).toInt()
+        val other = JagexColor.packHSL(5, 6, 50).toInt()
+
+        val find = shortArrayOf(original.toShort())
+        val replace = shortArrayOf(replacement.toShort())
+
+        assertEquals(replacement, OsrsObjectMeshBuilder.applyRecolor(original, find, replace))
+        assertEquals(other, OsrsObjectMeshBuilder.applyRecolor(other, find, replace))
+    }
+
+    @Test
+    fun meshCacheKeySeparatesRecoloredObjectDefinitions() {
+        val sharedModel = 9001
+        val orientation = 2
+        val keyA = OsrsObjectMeshBuilder.meshCacheKey(objectId = 100, sharedModel, orientation)
+        val keyB = OsrsObjectMeshBuilder.meshCacheKey(objectId = 200, sharedModel, orientation)
+        assertNotEquals(keyA, keyB)
+        assertEquals(keyA, OsrsObjectMeshBuilder.meshCacheKey(100, sharedModel, orientation))
+    }
+
+    @Test
+    fun fabricatedRecolorChangesDecodedVertexColor() {
+        val redHsl = JagexColor.packHSL(0, 6, 50).toInt()
+        val blueHsl = JagexColor.packHSL(20, 6, 50).toInt()
+
+        val model = triangleModel(redHsl)
+        val uncolored = OsrsObjectMeshBuilder.modelDefinitionToMesh(model, orientation = 0)
+        val recolored = OsrsObjectMeshBuilder.modelDefinitionToMesh(
+            model,
+            orientation = 0,
+            recolorToFind = shortArrayOf(redHsl.toShort()),
+            recolorToReplace = shortArrayOf(blueHsl.toShort())
+        )
+
+        val redPacked = uncolored.vertexData[6]
+        val bluePacked = recolored.vertexData[6]
+        assertNotEquals(redPacked, bluePacked, "recolor should change packed vertex color")
+
+        val expectedBlue = OsrsColorDecoder.hslToRgb(blueHsl)
+        val actualBlue = packedUvToLinearRgb(bluePacked)
+        assertEquals(expectedBlue[0], actualBlue[0], 0.02f)
+        assertEquals(expectedBlue[1], actualBlue[1], 0.02f)
+        assertEquals(expectedBlue[2], actualBlue[2], 0.02f)
+    }
+
+    @Test
+    fun supportedLocationTypesIncludeDiagonalWallsAndDecorationsExcludeRoofs() {
+        assertTrue(OsrsObjectMeshBuilder.isSupportedLocationType(0))
+        assertTrue(OsrsObjectMeshBuilder.isSupportedLocationType(4))
+        assertTrue(OsrsObjectMeshBuilder.isSupportedLocationType(8))
+        assertTrue(OsrsObjectMeshBuilder.isSupportedLocationType(9))
+        assertTrue(OsrsObjectMeshBuilder.isSupportedLocationType(10))
+        assertTrue(OsrsObjectMeshBuilder.isSupportedLocationType(22))
+        for (roofType in 12..21) {
+            assertFalse(
+                OsrsObjectMeshBuilder.isSupportedLocationType(roofType),
+                "roof type $roofType should stay excluded"
+            )
+        }
+    }
+
+    @Test
+    fun typeNineUsesSameOrientationBakingAsCardinalWalls() {
+        val model = triangleModel(JagexColor.packHSL(10, 4, 40).toInt())
+        val orientationOne = OsrsObjectMeshBuilder.modelDefinitionToMesh(model, orientation = 1)
+        val orientationThree = OsrsObjectMeshBuilder.modelDefinitionToMesh(model, orientation = 3)
+        assertNotEquals(
+            orientationOne.vertexData.copyOf(3),
+            orientationThree.vertexData.copyOf(3),
+            "diagonal wall orientations should rotate vertices"
+        )
+    }
+
+    @Test
+    fun retextureToFindMarksMatchingFacesAsTexturedFallback() {
+        val model = texturedTriangleModel(textureId = 42)
+        val fallback = OsrsColorDecoder.texturedFallbackLinear()
+        val mesh = OsrsObjectMeshBuilder.modelDefinitionToMesh(
+            model,
+            orientation = 0,
+            retextureToFind = shortArrayOf(42)
+        )
+        val rgb = packedUvToLinearRgb(mesh.vertexData[6])
+        assertEquals(fallback[0], rgb[0], 0.02f)
+        assertEquals(fallback[1], rgb[1], 0.02f)
+        assertEquals(fallback[2], rgb[2], 0.02f)
+    }
+
+    @Test
+    fun texturedFaceUsesPerTextureAverageWhenProvided() {
+        val model = texturedTriangleModel(textureId = 7)
+        val greyLinear = floatArrayOf(0.5f, 0.5f, 0.5f)
+        val cache = textureCache(mapOf(7 to greyLinear))
+        val mesh = OsrsObjectMeshBuilder.modelDefinitionToMesh(
+            model,
+            orientation = 0,
+            textureColors = cache
+        )
+        val rgb = packedUvToLinearRgb(mesh.vertexData[6])
+        assertEquals(greyLinear[0], rgb[0], 0.02f)
+        assertEquals(greyLinear[1], rgb[1], 0.02f)
+        assertEquals(greyLinear[2], rgb[2], 0.02f)
+    }
+
+    @Test
+    fun faceTransparencySplitSeparatesOpaqueTranslucentAndSkipsInvisible() {
+        val model = triangleModel(JagexColor.packHSL(0, 6, 50).toInt())
+        model.faceCount = 4
+        model.faceIndices1 = intArrayOf(0, 0, 0, 0)
+        model.faceIndices2 = intArrayOf(1, 1, 1, 1)
+        model.faceIndices3 = intArrayOf(2, 2, 2, 2)
+        model.faceColors = shortArrayOf(
+            JagexColor.packHSL(0, 6, 50).toShort(),
+            JagexColor.packHSL(5, 6, 50).toShort(),
+            JagexColor.packHSL(10, 6, 50).toShort(),
+            JagexColor.packHSL(15, 6, 50).toShort()
+        )
+        model.faceTransparencies = byteArrayOf(0, 64, (-4).toByte(), (-2).toByte())
+
+        assertEquals(OsrsObjectMeshBuilder.FaceTransparencyClass.OPAQUE, OsrsObjectMeshBuilder.classifyFaceTransparency(0))
+        assertEquals(OsrsObjectMeshBuilder.FaceTransparencyClass.TRANSLUCENT, OsrsObjectMeshBuilder.classifyFaceTransparency(64))
+        assertEquals(OsrsObjectMeshBuilder.FaceTransparencyClass.TRANSLUCENT, OsrsObjectMeshBuilder.classifyFaceTransparency(252))
+        assertEquals(OsrsObjectMeshBuilder.FaceTransparencyClass.INVISIBLE, OsrsObjectMeshBuilder.classifyFaceTransparency(254))
+
+        val meshes = OsrsObjectMeshBuilder.modelDefinitionToMeshes(model, orientation = 0)
+        assertEquals(1, meshes.opaque.triangleCount)
+        assertEquals(3, meshes.opaque.vertexCount)
+        assertEquals(2, meshes.translucent?.triangleCount)
+        assertEquals(6, meshes.translucent?.vertexCount)
+    }
+
+    @Test
+    fun fullyInvisibleModelProducesEmptyMeshes() {
+        val model = triangleModel(JagexColor.packHSL(0, 6, 50).toInt())
+        model.faceTransparencies = byteArrayOf(255.toByte())
+        val meshes = OsrsObjectMeshBuilder.modelDefinitionToMeshes(model, orientation = 0)
+        assertEquals(0, meshes.opaque.triangleCount)
+        assertEquals(null, meshes.translucent)
+        assertFalse(meshes.hasGeometry)
+    }
+
+    @Test
+    fun waterTexturedFaceSplitUsesWaterAlbedoAndSeparateSubMesh() {
+        val model = texturedTriangleModel(textureId = 1)
+        assertTrue(OsrsObjectMeshBuilder.isWaterTexturedFace(model.faceTextures, 0))
+
+        val meshes = OsrsObjectMeshBuilder.modelDefinitionToMeshes(model, orientation = 0)
+        assertEquals(0, meshes.opaque.triangleCount, "water face should not land in opaque mesh")
+        assertEquals(null, meshes.translucent)
+        assertEquals(1, meshes.water?.triangleCount)
+        assertEquals(3, meshes.water?.vertexCount)
+
+        val rgb = packedUvToLinearRgb(meshes.water!!.vertexData[6])
+        assertEquals(OsrsWaterOverlay.ALBEDO_LINEAR[0], rgb[0], 0.02f)
+        assertEquals(OsrsWaterOverlay.ALBEDO_LINEAR[1], rgb[1], 0.02f)
+        assertEquals(OsrsWaterOverlay.ALBEDO_LINEAR[2], rgb[2], 0.02f)
+    }
+
+    @Test
+    fun waterFaceTakesPriorityOverTranslucentTransparency() {
+        val model = texturedTriangleModel(textureId = 15)
+        model.faceTransparencies = byteArrayOf(128.toByte())
+
+        val meshes = OsrsObjectMeshBuilder.modelDefinitionToMeshes(model, orientation = 0)
+        assertEquals(0, meshes.opaque.triangleCount)
+        assertEquals(null, meshes.translucent)
+        assertEquals(1, meshes.water?.triangleCount)
+    }
+
+    @Test
+    fun resolveTexturedFaceColorFallsBackWhenTextureMissing() {
+        val cache = textureCache(emptyMap())
+        val fallback = OsrsColorDecoder.texturedFallbackLinear()
+        val rgb = OsrsObjectMeshBuilder.resolveTexturedFaceColor(12, cache)
+        assertEquals(fallback[0], rgb[0], 0.001f)
+        assertEquals(fallback[1], rgb[1], 0.001f)
+        assertEquals(fallback[2], rgb[2], 0.001f)
+    }
+
+    private fun textureCache(map: Map<Int, FloatArray>): OsrsTextureColorCache {
+        val ctor = OsrsTextureColorCache::class.java.getDeclaredConstructor(Map::class.java)
+        ctor.isAccessible = true
+        return ctor.newInstance(map) as OsrsTextureColorCache
+    }
+
+    private fun triangleModel(faceHsl: Int): ModelDefinition {
+        val def = ModelDefinition()
+        def.vertexCount = 3
+        def.vertexX = intArrayOf(0, 128, 0)
+        def.vertexY = intArrayOf(0, 0, 0)
+        def.vertexZ = intArrayOf(0, 0, 128)
+        def.faceCount = 1
+        def.faceIndices1 = intArrayOf(0)
+        def.faceIndices2 = intArrayOf(1)
+        def.faceIndices3 = intArrayOf(2)
+        def.faceColors = shortArrayOf(faceHsl.toShort())
+        return def
+    }
+
+    private fun texturedTriangleModel(textureId: Int): ModelDefinition {
+        val def = triangleModel(JagexColor.packHSL(0, 0, 0).toInt())
+        def.faceTextures = shortArrayOf(textureId.toShort())
+        return def
+    }
+
+    private fun packedUvToLinearRgb(packed: Float): FloatArray {
+        val bits = packed.toBits()
+        val r = ((bits shr 16) and 0xFF) / 255f
+        val g = ((bits shr 8) and 0xFF) / 255f
+        val b = (bits and 0xFF) / 255f
+        return floatArrayOf(r, g, b)
+    }
+}

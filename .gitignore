@@ -17,3 +17,9 @@ data/rag/
 data/book_builds/
 *.litematic
 *.pt
+
+# Gradle
+lumina/.gradle/
+lumina/build/
+lumina/*/build/
+lumina/*/*/build/

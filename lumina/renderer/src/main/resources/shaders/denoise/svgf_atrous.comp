@@ -1,0 +1,79 @@
+#version 460
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0, rgba32f) uniform image2D inputColor;
+layout(binding = 1, rgba32f) uniform image2D normalDepth;
+layout(binding = 2, rg32f)   uniform image2D moments;
+layout(binding = 3, rgba32f) uniform image2D outputColor;
+
+layout(push_constant) uniform Params {
+    int stepSize;
+    float sigmaLuminance;
+    float sigmaNormal;
+    float sigmaDepth;
+    int iteration;
+};
+
+const float kernel[3] = float[](1.0, 2.0/3.0, 1.0/6.0);
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(inputColor);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec4 centerColor = imageLoad(inputColor, coord);
+    vec4 centerND = imageLoad(normalDepth, coord);
+    vec3 centerNormal = centerND.xyz;
+    float centerDepth = centerND.w;
+
+    if (centerDepth >= 9999.0) {
+        imageStore(outputColor, coord, vec4(centerColor.rgb, 1.0));
+        return;
+    }
+
+    vec2 mom = imageLoad(moments, coord).xy;
+    float variance = max(mom.y - mom.x * mom.x, 0.0);
+    float sigmaL = sigmaLuminance * sqrt(max(variance, 1e-6));
+
+    vec3 sumColor = vec3(0.0);
+    float sumWeight = 0.0;
+
+    for (int dy = -2; dy <= 2; dy++) {
+        for (int dx = -2; dx <= 2; dx++) {
+            ivec2 offset = ivec2(dx, dy) * stepSize;
+            ivec2 sampleCoord = clamp(coord + offset, ivec2(0), size - 1);
+
+            vec4 sampleColor = imageLoad(inputColor, sampleCoord);
+            vec4 sampleND = imageLoad(normalDepth, sampleCoord);
+
+            float kw = kernel[abs(dx)] * kernel[abs(dy)];
+
+            // Normal edge-stopping
+            float normalDot = max(dot(centerNormal, sampleND.xyz), 0.0);
+            float normalWeight = pow(normalDot, sigmaNormal);
+
+            // Depth edge-stopping
+            float depthDiff = abs(centerDepth - sampleND.w) / max(abs(centerDepth) * sigmaDepth, 1e-6);
+            float depthWeight = exp(-depthDiff);
+
+            // Luminance edge-stopping
+            float centerLum = dot(centerColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+            float sampleLum = dot(sampleColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+            float lumDiff = abs(centerLum - sampleLum) / max(sigmaL, 1e-6);
+            float lumWeight = exp(-lumDiff);
+
+            float w;
+            if (dx == 0 && dy == 0) {
+                w = kw;
+            } else {
+                w = kw * normalWeight * depthWeight * lumWeight;
+            }
+            sumColor += sampleColor.rgb * w;
+            sumWeight += w;
+        }
+    }
+
+    vec3 result = sumColor / max(sumWeight, 1e-6);
+    imageStore(outputColor, coord, vec4(result, 1.0));
+}

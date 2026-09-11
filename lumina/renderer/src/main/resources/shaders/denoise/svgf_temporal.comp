@@ -1,0 +1,179 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : require
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0, rgba32f) uniform image2D currentColor;
+layout(binding = 1, rgba32f) uniform image2D historyColor;
+layout(binding = 2, rgba32f) uniform image2D normalDepth;
+layout(binding = 3, rg16f)   uniform image2D motionVectors;
+layout(binding = 4, rgba32f) uniform image2D outputColor;
+layout(binding = 5, rg32f)   uniform image2D moments; // mean luminance, variance
+layout(binding = 6, scalar) uniform CameraUBO {
+    mat4 viewInverse;
+    mat4 projInverse;
+    mat4 prevViewProj;
+    vec3 position;
+    float fov;
+    uint cameraFrameCount;
+    uint spp;
+    uint maxBounces;
+    float time;
+} camera;
+
+layout(push_constant) uniform Params {
+    float minAlpha;       // floor for color blend: max(1/historyLen, minAlpha)
+    float minMomentAlpha; // floor for moment blend: max(1/historyLen, minMomentAlpha)
+    uint frameCount;
+    float cameraMoved;    // 1 = camera moved this frame, 0 = still
+};
+
+const uint MAX_HISTORY_LEN = 64u;
+const uint CLAMP_HISTORY_CAP = 4u;
+const uint MOTION_HISTORY_CAP = 16u;
+const float NORMAL_REJECT_DOT = 0.85;
+const float WORLD_POS_REJECT_SCALE = 0.05;
+
+vec3 rgbToYCoCg(vec3 rgb) {
+    return vec3(
+        0.25 * rgb.r + 0.5 * rgb.g + 0.25 * rgb.b,
+        0.5 * rgb.r - 0.5 * rgb.b,
+        -0.25 * rgb.r + 0.5 * rgb.g - 0.25 * rgb.b
+    );
+}
+
+vec3 yCoCgToRgb(vec3 ycocg) {
+    return vec3(
+        ycocg.x + ycocg.y - ycocg.z,
+        ycocg.x + ycocg.z,
+        ycocg.x - ycocg.y - ycocg.z
+    );
+}
+
+// Depth in normalDepth.w is ray-hit distance (length from camera along primary ray), not NDC Z.
+vec3 reconstructWorldPos(ivec2 coord, ivec2 size, float depth) {
+    vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+    vec2 ndc = uv * 2.0 - 1.0;
+    ndc.y = -ndc.y;
+    vec4 target = camera.projInverse * vec4(ndc.x, ndc.y, 1.0, 1.0);
+    target.xyz /= target.w;
+    vec4 direction = camera.viewInverse * vec4(normalize(target.xyz), 0.0);
+    return camera.position + direction.xyz * depth;
+}
+
+vec2 reprojectToPrevUV(vec3 worldPos) {
+    vec4 clip = camera.prevViewProj * vec4(worldPos, 1.0);
+    return clip.xy / clip.w * 0.5 + 0.5;
+}
+
+bool historySampleValid(
+    ivec2 coord,
+    ivec2 historyCoord,
+    ivec2 size,
+    vec3 worldPos,
+    vec3 normal,
+    float depth
+) {
+    if (historyCoord.x < 0 || historyCoord.x >= size.x ||
+        historyCoord.y < 0 || historyCoord.y >= size.y) {
+        return false;
+    }
+
+    vec4 histND = imageLoad(normalDepth, historyCoord);
+    float normalDot = dot(normalize(normal), normalize(histND.xyz));
+    if (normalDot < NORMAL_REJECT_DOT) {
+        return false;
+    }
+
+    vec3 histWorldPos = reconstructWorldPos(historyCoord, size, histND.w);
+    float posDiff = length(worldPos - histWorldPos);
+    float rejectDist = max(depth * WORLD_POS_REJECT_SCALE, 0.5);
+    return posDiff <= rejectDist;
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(currentColor);
+    if (coord.x >= size.x || coord.y >= size.y) return;
+
+    vec4 current = imageLoad(currentColor, coord);
+    vec4 nd = imageLoad(normalDepth, coord);
+    vec3 normal = nd.xyz;
+    float depth = nd.w;
+
+    vec3 worldPos = reconstructWorldPos(coord, size, depth);
+    vec2 prevUV = reprojectToPrevUV(worldPos);
+    ivec2 historyCoord = ivec2(prevUV * vec2(size));
+
+    bool validHistory = frameCount > 0 &&
+                        prevUV.x >= 0.0 && prevUV.x <= 1.0 &&
+                        prevUV.y >= 0.0 && prevUV.y <= 1.0 &&
+                        historySampleValid(coord, historyCoord, size, worldPos, normal, depth);
+
+    vec4 result;
+    vec2 newMoments;
+
+    if (validHistory) {
+        vec4 history = imageLoad(historyColor, historyCoord);
+        uint prevHistoryLen = max(uint(history.a + 0.5), 1u);
+
+        // YCoCg AABB clamping for ghosting rejection
+        vec3 minColor = vec3(1e10);
+        vec3 maxColor = vec3(-1e10);
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                ivec2 nc = clamp(coord + ivec2(dx, dy), ivec2(0), size - 1);
+                vec3 ycocg = rgbToYCoCg(imageLoad(currentColor, nc).rgb);
+                minColor = min(minColor, ycocg);
+                maxColor = max(maxColor, ycocg);
+            }
+        }
+
+        vec3 center = (minColor + maxColor) * 0.5;
+        vec3 halfExtent = (maxColor - minColor) * 0.5;
+
+        vec3 historyYCoCg = rgbToYCoCg(history.rgb);
+        bool outsideOriginal = any(lessThan(historyYCoCg, minColor)) ||
+                               any(greaterThan(historyYCoCg, maxColor));
+
+        vec3 clampedYCoCg;
+        bool clampModified;
+        if (cameraMoved > 0.5) {
+            // Camera motion: tight AABB only — skip widening that drags stale history.
+            clampedYCoCg = clamp(historyYCoCg, minColor, maxColor);
+            clampModified = distance(clampedYCoCg, historyYCoCg) > 1e-4;
+        } else {
+            // Widen clamp box as history grows so stable pixels can fully converge.
+            float aabbScale = min(1.0 + float(prevHistoryLen) * 0.05, 3.0);
+            vec3 minColorWide = center - halfExtent * aabbScale;
+            vec3 maxColorWide = center + halfExtent * aabbScale;
+            clampedYCoCg = clamp(historyYCoCg, minColorWide, maxColorWide);
+            clampModified = distance(clampedYCoCg, historyYCoCg) > 1e-4;
+        }
+        vec3 clampedHistory = yCoCgToRgb(clampedYCoCg);
+
+        uint historyLen = min(prevHistoryLen + 1u, MAX_HISTORY_LEN);
+        if (cameraMoved > 0.5) {
+            historyLen = min(historyLen, MOTION_HISTORY_CAP);
+        } else if (outsideOriginal || clampModified) {
+            historyLen = min(historyLen, CLAMP_HISTORY_CAP);
+        }
+
+        float blendAlpha = max(1.0 / float(historyLen), minAlpha);
+        float momentBlend = max(1.0 / float(historyLen), minMomentAlpha);
+        result = vec4(mix(clampedHistory, current.rgb, blendAlpha), float(historyLen));
+
+        // Moments for variance estimation
+        float lum = dot(result.rgb, vec3(0.2126, 0.7152, 0.0722));
+        vec2 prevMoments = imageLoad(moments, historyCoord).xy;
+        newMoments.x = mix(prevMoments.x, lum, momentBlend);
+        newMoments.y = mix(prevMoments.y, lum * lum, momentBlend);
+    } else {
+        result = vec4(current.rgb, 1.0);
+        float lum = dot(result.rgb, vec3(0.2126, 0.7152, 0.0722));
+        newMoments = vec2(lum, lum * lum);
+    }
+
+    imageStore(outputColor, coord, result);
+    imageStore(moments, coord, vec4(newMoments, 0.0, 0.0));
+}
