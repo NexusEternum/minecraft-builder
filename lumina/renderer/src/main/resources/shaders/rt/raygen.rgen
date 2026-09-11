@@ -86,7 +86,7 @@ void main() {
                 10000.0,
                 0);
 
-            radiance += min(throughput * payload.color, vec3(20.0));
+            radiance += min(throughput * payload.color, vec3(4.0));
             if (payload.missed) {
                 break;
             }

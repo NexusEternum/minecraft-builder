@@ -71,8 +71,7 @@ void main() {
     else if (mode == 1) color = aces(color);
     else if (mode == 2) color = reinhard(color);
 
-    // Gamma correction
-    color = pow(max(color, vec3(0.0)), vec3(1.0 / gamma));
+    // No manual gamma: swapchain is sRGB, encoding happens on blit write
 
     imageStore(outputImage, coord, vec4(clamp(color, 0.0, 1.0), 1.0));
 }

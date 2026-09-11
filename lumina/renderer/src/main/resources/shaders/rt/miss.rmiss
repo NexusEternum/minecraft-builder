@@ -40,7 +40,7 @@ vec3 proceduralSky(vec3 dir) {
     vec3 skyColor = mix(zenithColor, horizonColor, horizon * horizon);
 
     // Sun disk
-    float sunSize = pow(sunDot, 256.0) * 10.0;
+    float sunSize = pow(sunDot, 256.0) * 4.0;
     vec3 sunGlow = vec3(1.4, 1.2, 0.9) * pow(sunDot, 8.0) * 0.5;
 
     // Ground

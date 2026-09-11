@@ -26,6 +26,11 @@ void main() {
     vec3 centerNormal = centerND.xyz;
     float centerDepth = centerND.w;
 
+    if (centerDepth >= 9999.0) {
+        imageStore(outputColor, coord, vec4(centerColor.rgb, 1.0));
+        return;
+    }
+
     vec2 mom = imageLoad(moments, coord).xy;
     float variance = max(mom.y - mom.x * mom.x, 0.0);
     float sigmaL = sigmaLuminance * sqrt(max(variance, 1e-6));
@@ -57,7 +62,12 @@ void main() {
             float lumDiff = abs(centerLum - sampleLum) / max(sigmaL, 1e-6);
             float lumWeight = exp(-lumDiff);
 
-            float w = kw * normalWeight * depthWeight * lumWeight;
+            float w;
+            if (dx == 0 && dy == 0) {
+                w = kw;
+            } else {
+                w = kw * normalWeight * depthWeight * lumWeight;
+            }
             sumColor += sampleColor.rgb * w;
             sumWeight += w;
         }
