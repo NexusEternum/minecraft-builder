@@ -31,7 +31,7 @@ class SceneGraph {
     fun allNodes(): Collection<SceneNode> = entities.values
 
     fun nodesWithComponent(type: Class<*>): List<SceneNode> {
-        return entities.values.filter { it.hasComponent(type) }
+        return entities.values.filter { it.hasComponent(type) }.sortedBy { it.id }
     }
 
     fun clearDirty() { dirty = false }

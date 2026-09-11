@@ -31,9 +31,16 @@ class CameraController @Inject constructor(
     private var firstMouse: Boolean = true
     private var mouseCaptured: Boolean = false
 
+    private var frameIndex = 0L
+
     fun update(window: Long, deltaTime: Float, jitterX: Float = 0f, jitterY: Float = 0f) {
         handleKeyboard(window, deltaTime)
         rtPipeline.updateCamera(x, y, z, pitch, yaw, fov, nearPlane, farPlane, jitterX, jitterY)
+        if (frameIndex < 3) {
+            log.info("Camera frame {}: pos=({}, {}, {}), pitch={}, yaw={}, fov={}",
+                frameIndex, x, y, z, pitch, yaw, fov)
+        }
+        frameIndex++
     }
 
     private fun handleKeyboard(window: Long, dt: Float) {

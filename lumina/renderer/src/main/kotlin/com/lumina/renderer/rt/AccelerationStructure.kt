@@ -138,7 +138,7 @@ class AccelerationStructureManager @Inject constructor(
             blasCache[hash] = entry
             mesh.blasId = hash
 
-            log.debug("Built BLAS: {} triangles, {} bytes", mesh.triangleCount, sizeInfo.accelerationStructureSize())
+            log.info("Built BLAS: {} triangles, {} bytes, indexTriBase={}", mesh.triangleCount, sizeInfo.accelerationStructureSize(), indexTriBase)
             return hash
         }
     }
@@ -275,7 +275,7 @@ class AccelerationStructureManager @Inject constructor(
             VulkanMemory.destroyBuffer(ctx, scratch)
             VulkanMemory.destroyBuffer(ctx, instBuf)
 
-            log.debug("Rebuilt TLAS: {} instances", instances.size)
+            log.info("Rebuilt TLAS: {} instances, AS handle={}", instances.size, tlasAccelStruct)
         }
     }
 
