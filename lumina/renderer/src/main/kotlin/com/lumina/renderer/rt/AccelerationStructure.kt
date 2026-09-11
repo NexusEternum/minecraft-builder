@@ -215,7 +215,9 @@ class AccelerationStructureManager @Inject constructor(
                 // accelerationStructureReference
                 instanceData.putLong(offset + 56, blas.deviceAddress)
             }
-            instanceData.flip()
+            // NOTE: all writes above are absolute (indexed) puts which do NOT advance
+            // the buffer position, so flip() must NOT be called here — it would set
+            // limit=0 and uploadBuffer would copy nothing (empty TLAS, all rays miss).
 
             val instBuf = VulkanMemory.createBuffer(
                 ctx, instanceSize,
