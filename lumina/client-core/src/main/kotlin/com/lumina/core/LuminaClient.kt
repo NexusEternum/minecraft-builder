@@ -160,6 +160,7 @@ class LuminaClient(private val args: Array<String>) {
         log.info("F6         - Toggle volumetric fog")
         log.info("F7         - Cycle tone mapping (AgX/ACES/Reinhard/None)")
         log.info("F8         - Cycle upscale quality")
+        log.info("F9         - Toggle raw path-traced output (skip denoiser/postfx)")
         log.info("+/-        - Adjust exposure")
         log.info("F11        - Toggle debug mode (flat albedo, no shadows)")
         log.info("ESC        - Toggle mouse capture")

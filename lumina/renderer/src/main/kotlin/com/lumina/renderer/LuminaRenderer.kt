@@ -39,6 +39,8 @@ class LuminaRenderer @Inject constructor(
 
     var frameCount: Long = 0; private set
     var lastFrameTimeMs: Double = 0.0; private set
+    var rawOutputMode: Boolean = false
+        private set
     private var lastFrameNanos: Long = 0
     private var descriptorsDirty = true
 
@@ -77,13 +79,38 @@ class LuminaRenderer @Inject constructor(
         val tonemapOut = renderTargets.tonemapOutput ?: return
 
         if (vkContext.rtSupported) {
-            denoiser.updateDescriptors()
-            val bloomScratchA = renderTargets.bloomScratchA ?: return
-            val rtNormalDepth = renderTargets.rtNormalDepth ?: return
-            postProcess.updateDescriptors(bloomScratchA, rtNormalDepth, tonemapOut)
+            if (rawOutputMode) {
+                postProcess.updateTonemapDescriptors(rtOutput, tonemapOut)
+            } else {
+                denoiser.updateDescriptors()
+                val bloomScratchA = renderTargets.bloomScratchA ?: return
+                val rtNormalDepth = renderTargets.rtNormalDepth ?: return
+                postProcess.updateDescriptors(bloomScratchA, rtNormalDepth, tonemapOut)
+            }
         } else {
             postProcess.updateTonemapDescriptors(rtOutput, tonemapOut)
         }
+    }
+
+    fun setRawOutputMode(enabled: Boolean) {
+        if (rawOutputMode == enabled) return
+        vkContext.device?.let { vkDeviceWaitIdle(it) }
+        rawOutputMode = enabled
+        val rtOutput = renderTargets.rtOutputColor
+        val tonemapOut = renderTargets.tonemapOutput
+        if (rtOutput != null && tonemapOut != null && vkContext.rtSupported) {
+            if (enabled) {
+                postProcess.updateTonemapDescriptors(rtOutput, tonemapOut)
+            } else {
+                val bloomScratchA = renderTargets.bloomScratchA
+                val rtNormalDepth = renderTargets.rtNormalDepth
+                if (bloomScratchA != null && rtNormalDepth != null) {
+                    postProcess.updateDescriptors(bloomScratchA, rtNormalDepth, tonemapOut)
+                }
+            }
+        }
+        descriptorsDirty = true
+        log.info("Raw output mode: {}", enabled)
     }
 
     fun renderFrame() {
@@ -108,11 +135,15 @@ class LuminaRenderer @Inject constructor(
             rtPipeline.recordCommands(cmdBuf, renderTargets.renderWidth, renderTargets.renderHeight)
             insertRTToComputeBarrier(cmdBuf)
 
-            denoiser.recordCommands(cmdBuf)
-            RenderTargets.insertComputeBarrier(cmdBuf)
-            copyDenoiseHistory(cmdBuf)
+            if (rawOutputMode) {
+                postProcess.recordTonemapOnly(cmdBuf, renderTargets.renderWidth, renderTargets.renderHeight)
+            } else {
+                denoiser.recordCommands(cmdBuf)
+                RenderTargets.insertComputeBarrier(cmdBuf)
+                copyDenoiseHistory(cmdBuf)
 
-            postProcess.recordCommands(cmdBuf, renderTargets.renderWidth, renderTargets.renderHeight)
+                postProcess.recordCommands(cmdBuf, renderTargets.renderWidth, renderTargets.renderHeight)
+            }
         } else {
             postProcess.recordTonemapOnly(cmdBuf, vkContext.width, vkContext.height)
         }

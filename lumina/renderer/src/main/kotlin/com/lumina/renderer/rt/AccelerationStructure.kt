@@ -5,6 +5,7 @@ import com.lumina.renderer.vulkan.VulkanContext
 import com.lumina.renderer.vulkan.VulkanMemory
 import com.lumina.scene.graph.MeshComponent
 import com.lumina.scene.graph.SceneGraph
+import com.lumina.scene.graph.SceneNode
 import com.lumina.scene.graph.Transform
 import org.lwjgl.system.MemoryStack
 import org.lwjgl.system.MemoryUtil
@@ -36,6 +37,7 @@ class AccelerationStructureManager @Inject constructor(
 ) {
     private val log = LoggerFactory.getLogger(AccelerationStructureManager::class.java)
     private val blasCache = mutableMapOf<Int, BLASEntry>()
+    private var expectedMeshNodeIds: List<Int> = emptyList()
     private var tlasHandle: Long = 0
     private var tlasAccelStruct: Long = 0
     private var tlasBuffer: Long = 0
@@ -168,18 +170,44 @@ class AccelerationStructureManager @Inject constructor(
         }
     }
 
+    fun setExpectedMeshNodeOrder(nodeIds: List<Int>) {
+        expectedMeshNodeIds = nodeIds
+    }
+
     fun rebuildTLAS() {
         if (!ctx.rtSupported) return
         val dev = ctx.device!!
 
         val meshNodes = sceneGraph.nodesWithComponent(MeshComponent::class.java)
-        val instances = mutableListOf<Pair<BLASEntry, Transform>>()
+        val currentNodeIds = meshNodes.map { it.id }
+        if (expectedMeshNodeIds.isNotEmpty() && currentNodeIds != expectedMeshNodeIds) {
+            log.warn(
+                "Mesh node order mismatch vs upload: upload={} current={} (names: upload=[{}] current=[{}])",
+                expectedMeshNodeIds, currentNodeIds,
+                expectedMeshNodeIds.joinToString { id -> sceneGraph.getNode(id)?.name ?: "?$id" },
+                meshNodes.joinToString { it.name }
+            )
+        }
 
-        for (node in meshNodes) {
-            val mesh = node.getComponent(MeshComponent::class.java) ?: continue
+        data class TlasInstance(val node: SceneNode, val blas: BLASEntry, val transform: Transform)
+        val instances = mutableListOf<TlasInstance>()
+
+        for ((meshIndex, node) in meshNodes.withIndex()) {
+            val mesh = node.getComponent(MeshComponent::class.java)
+            if (mesh == null) {
+                log.warn("TLAS skip: mesh[{}] node={} id={} — no MeshComponent (desyncs material index {})", meshIndex, node.name, node.id, meshIndex)
+                continue
+            }
             val transform = node.getComponent(Transform::class.java) ?: Transform()
-            val blas = blasCache[mesh.blasId] ?: continue
-            instances.add(blas to transform)
+            val blas = blasCache[mesh.blasId]
+            if (blas == null) {
+                log.warn(
+                    "TLAS skip: mesh[{}] node={} id={} blasId=0x{} not in blasCache (desyncs material index {})",
+                    meshIndex, node.name, node.id, Integer.toHexString(mesh.blasId), meshIndex
+                )
+                continue
+            }
+            instances.add(TlasInstance(node, blas, transform))
         }
 
         if (instances.isEmpty()) return
@@ -189,8 +217,9 @@ class AccelerationStructureManager @Inject constructor(
             val instanceSize = 64L * instances.size // VkAccelerationStructureInstanceKHR = 64 bytes
             val instanceData = MemoryUtil.memAlloc(instanceSize.toInt())
 
-            for ((i, pair) in instances.withIndex()) {
-                val (blas, xform) = pair
+            for ((i, inst) in instances.withIndex()) {
+                val blas = inst.blas
+                val xform = inst.transform
                 val offset = i * 64
 
                 // 3x4 row-major transform matrix
@@ -214,6 +243,13 @@ class AccelerationStructureManager @Inject constructor(
                 instanceData.putInt(offset + 52, 0)
                 // accelerationStructureReference
                 instanceData.putLong(offset + 56, blas.deviceAddress)
+
+                log.info(
+                    "tlas[{}] {} id={} blas=0x{} triBase={} customIndex={}",
+                    i, inst.node.name, inst.node.id,
+                    Integer.toHexString(inst.node.getComponent(MeshComponent::class.java)?.blasId ?: 0),
+                    blas.indexTriBase, customIndex
+                )
             }
             // NOTE: all writes above are absolute (indexed) puts which do NOT advance
             // the buffer position, so flip() must NOT be called here — it would set

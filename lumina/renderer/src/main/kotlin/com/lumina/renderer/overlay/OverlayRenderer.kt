@@ -12,11 +12,12 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** Bumped on renderer-affecting commits so screenshots prove which build is running. */
-const val BUILD_STAMP = "b7-specfix"
+const val BUILD_STAMP = "b8-diag"
 
 @Singleton
 class OverlayRenderer @Inject constructor(
     private val ctx: VulkanContext,
+    private val renderer: LuminaRenderer,
     private val postProcess: PostProcessStack,
     private val upscale: UpscaleManager,
     private val rtPipeline: RayTracingPipeline
@@ -68,6 +69,9 @@ class OverlayRenderer @Inject constructor(
             sb.append(" | RT: ${ctx.rtSupported}")
             sb.append(" | Tonemap: ${postProcess.toneMappingMode}")
         }
+        if (renderer.rawOutputMode) {
+            sb.append(" | RAW")
+        }
         return sb.toString()
     }
 
@@ -98,6 +102,10 @@ class OverlayRenderer @Inject constructor(
                 }
                 log.info("Upscale quality: {} ({}x{} -> {}x{})",
                     upscale.quality, upscale.renderWidth, upscale.renderHeight, ctx.width, ctx.height); true
+            }
+            GLFW_KEY_F9 -> {
+                renderer.setRawOutputMode(!renderer.rawOutputMode)
+                log.info("Raw output mode: {}", renderer.rawOutputMode); true
             }
             GLFW_KEY_EQUAL -> {
                 postProcess.exposure = (postProcess.exposure * 1.1f).coerceAtMost(10f)

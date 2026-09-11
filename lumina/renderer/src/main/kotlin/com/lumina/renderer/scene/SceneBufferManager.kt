@@ -7,6 +7,7 @@ import com.lumina.renderer.vulkan.VulkanMemory
 import com.lumina.scene.graph.MaterialComponent
 import com.lumina.scene.graph.MeshComponent
 import com.lumina.scene.graph.SceneGraph
+import com.lumina.scene.graph.SceneNode
 import org.lwjgl.system.MemoryUtil
 import org.lwjgl.vulkan.KHRAccelerationStructure.VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR
 import org.lwjgl.vulkan.KHRBufferDeviceAddress.VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR
@@ -78,8 +79,16 @@ class SceneBufferManager @Inject constructor(
         var indexOffset = 0  // in indices
         var meshIdx = 0
 
-        data class MeshInfo(val mesh: MeshComponent, val idxByteOffset: Int, val indexTriBase: Int)
+        data class MeshInfo(
+            val node: SceneNode,
+            val mesh: MeshComponent,
+            val mat: MaterialComponent,
+            val idxByteOffset: Int,
+            val localIndexTriBase: Int,
+            val materialIndex: Int
+        )
         val meshInfos = mutableListOf<MeshInfo>()
+        val uploadNodeIds = mutableListOf<Int>()
 
         for (node in meshNodes) {
             val mesh = node.getComponent(MeshComponent::class.java) ?: continue
@@ -94,7 +103,8 @@ class SceneBufferManager @Inject constructor(
 
             val idxByteOffset = indexOffset * 4
             val indexTriBase = indexOffset / 3
-            meshInfos.add(MeshInfo(mesh, idxByteOffset, indexTriBase))
+            meshInfos.add(MeshInfo(node, mesh, mat, idxByteOffset, indexTriBase, meshIdx))
+            uploadNodeIds.add(node.id)
 
             vertexOffset += mesh.vertexData.size / 8
             indexOffset += mesh.indexData.size
@@ -116,13 +126,23 @@ class SceneBufferManager @Inject constructor(
 
         // Build BLAS after data is on the GPU
         for (info in meshInfos) {
-            accelStructure.buildBLAS(info.mesh, vertBuf.buffer, idxBuf.buffer, 0, info.idxByteOffset, info.indexTriBase, vertexOffset)
+            accelStructure.buildBLAS(info.mesh, vertBuf.buffer, idxBuf.buffer, 0, info.idxByteOffset, info.localIndexTriBase, vertexOffset)
         }
+
+        accelStructure.setExpectedMeshNodeOrder(uploadNodeIds)
 
         // Per-mesh indexTriBase for closest-hit shader (uses BLAS entry when geometry is deduplicated)
         for (info in meshInfos) {
             val indexTriBase = accelStructure.getIndexTriBase(info.mesh.blasId)
             instanceInfoData.putInt(indexTriBase)
+            log.info(
+                "mesh[{}] {} id={} albedo=({},{},{}) emissive=({},{},{}) rough={} metal={} blas=0x{} triBase={}",
+                info.materialIndex, info.node.name, info.node.id,
+                info.mat.albedo[0], info.mat.albedo[1], info.mat.albedo[2],
+                info.mat.emissive[0], info.mat.emissive[1], info.mat.emissive[2],
+                info.mat.roughness, info.mat.metallic,
+                Integer.toHexString(info.mesh.blasId), indexTriBase
+            )
         }
         instanceInfoData.flip()
         VulkanMemory.uploadBuffer(ctx, instanceInfoBuf, instanceInfoData)
