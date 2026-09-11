@@ -26,9 +26,9 @@ class SVGFDenoiser @Inject constructor(
 
     // Must stay ODD so the final A-Trous pass writes to bloomScratchA (post-process input).
     var atrousIterations: Int = 3
-    var temporalAlpha: Float = 0.15f
+    var temporalAlpha: Float = 0.1f
     var momentAlpha: Float = 0.3f
-    var sigmaLuminance: Float = 2.5f
+    var sigmaLuminance: Float = 3.0f
     var sigmaNormal: Float = 128.0f
     var sigmaDepth: Float = 1.0f
 
