@@ -15,7 +15,7 @@ import kotlin.math.sqrt
  * - [cameraPitch]/[cameraYaw]: JAU14 angles — 0x4000 units per full circle; see Perspective.UNIT14 (~pi/8192 rad/unit).
  * - Scene axes: local X = east, local Y = north; Lumina maps X=east, Z=north, Y=up with negated OSRS height.
  *
- * Scene-local origin: geometry and camera are expressed relative to [originBaseX]/[originBaseY]
+ * Scene-local origin: geometry is expressed relative to [originBaseX]/[originBaseY]
  * (client [Client.getBaseX]/[getBaseY] at load time) to keep float coordinates small for RT precision.
  */
 object OsrsCoordinateMapper {
@@ -61,6 +61,10 @@ object OsrsCoordinateMapper {
         return offsetX to offsetZ
     }
 
+    /** Valid, unique region IDs from a client [Client.getMapRegions] array (drops 0 / negative). */
+    fun normalizeRegionIds(mapRegions: IntArray): IntArray =
+        mapRegions.filter { it > 0 }.distinct().toIntArray()
+
     fun jau14ToRadians(jau: Int): Double = (jau and (JAU14_UNITS - 1)) * JAU14_TO_RADIANS
 
     /**
@@ -71,10 +75,8 @@ object OsrsCoordinateMapper {
     /**
      * Camera position in Lumina world units relative to [originBaseX]/[originBaseY].
      *
-     * Formulas (scene-local origin at load-time base):
-     * - luminaX = (cameraX / 128) * TILE_SCALE
-     * - luminaZ = (cameraY / 128) * TILE_SCALE
-     * - luminaY = -(cameraZ / 128) * TILE_SCALE
+     * [baseX]/[baseY] are the client's current scene SW corner (tiles); [cameraX]/[cameraY] are local
+     * to that corner. World tile = base + local, then subtract the frozen scene origin used at load.
      */
     fun cameraToLumina(
         cameraX: Int,
@@ -82,13 +84,15 @@ object OsrsCoordinateMapper {
         cameraZ: Int,
         cameraPitch: Int,
         cameraYaw: Int,
+        baseX: Int,
+        baseY: Int,
         originBaseX: Int,
         originBaseY: Int
     ): LuminaCamera {
         val sceneTileX = localUnitsToSceneTiles(cameraX)
         val sceneTileY = localUnitsToSceneTiles(cameraY)
-        val luminaX = sceneTileX * TILE_SCALE
-        val luminaZ = sceneTileY * TILE_SCALE
+        val luminaX = (baseX + sceneTileX - originBaseX) * TILE_SCALE
+        val luminaZ = (baseY + sceneTileY - originBaseY) * TILE_SCALE
         val luminaY = -localUnitsToSceneTiles(cameraZ) * TILE_SCALE
 
         val (pitch, yaw) = cameraAnglesToLumina(cameraPitch, cameraYaw)
@@ -96,33 +100,57 @@ object OsrsCoordinateMapper {
     }
 
     /**
-     * Converts JAU14 pitch/yaw into Lumina [CameraController] radians.
+     * Converts JAU14 pitch/yaw into Lumina [CameraController] / [RayTracingPipeline.computeViewInverse] radians.
      *
-     * Derivation mirrors RuneLite [Perspective.localToCanvasGpu] rotation: OSRS local X=east,
-     * Y=north, Z=up; Lumina X=east, Z=north, Y=up. At OSRS yaw=0 the camera faces north (+Z).
-     * Lumina [CameraController] at yaw=0 faces +Z, so yaw maps directly from JAU14 with axis flips
-     * on pitch (OSRS positive pitch looks down; Lumina negative pitch looks down).
+     * ## OSRS basis (RuneLite Perspective.localToCanvasGpu)
+     * Scene axes: X=east, Y=north, Z=up. Yaw then pitch; at yaw=0,pitch=0 the camera faces **north** (+Y).
+     * Mapped into Lumina (X=east, Z=north, Y=up) the look direction is:
+     *   f_osrs = (sin(y)cos(p), -sin(p), cos(y)cos(p))
+     *
+     * ## Lumina basis (CameraController + computeViewInverse)
+     * Yaw about +Y, pitch about +X; rotation order R_yaw * R_pitch. View direction (camera looks down -Z_cam):
+     *   f_lum = (cos(p)sin(y_l), -sin(p), -cos(p)cos(y_l))
+     *
+     * ## Matching (same pitch sign; yaw reflected across north)
+     * f_lum = f_osrs when pitch_l = pitch_osrs and yaw_l = π - yaw_osrs.
+     *
+     * Decomposing f_osrs with atan2(dirX, dirZ) assumes yaw_l=0 faces +Z, but Lumina yaw_l=0 faces -Z;
+     * that 180° yaw-plane mismatch couples with pitch and produces rotation about a tilted axis when yaw changes.
      */
     fun cameraAnglesToLumina(cameraPitch: Int, cameraYaw: Int): Pair<Float, Float> {
         val pitchRad = jau14ToRadians(cameraPitch).toFloat()
         val yawRad = jau14ToRadians(cameraYaw).toFloat()
-
-        val pitchSin = sin(pitchRad)
-        val pitchCos = cos(pitchRad)
-        val yawSin = sin(yawRad)
-        val yawCos = cos(yawRad)
-
-        // Forward direction in Lumina world (unit) from Jagex yaw-then-pitch rotation.
-        val dirX = yawSin * pitchCos
-        val dirY = -pitchSin
-        val dirZ = yawCos * pitchCos
-
-        val luminaYaw = atan2(dirX, dirZ)
-        val horizontal = sqrt(dirX * dirX + dirZ * dirZ)
-        val luminaPitch = atan2(dirY, horizontal)
+        val luminaPitch = pitchRad
+        val luminaYaw = normalizeAnglePi((PI - yawRad).toFloat())
         return luminaPitch to luminaYaw
     }
 
+    /** OSRS camera forward unit vector in Lumina world coords (for tests / debugging). */
+    fun osrsLookDirectionLumina(cameraPitch: Int, cameraYaw: Int): Triple<Float, Float, Float> {
+        val pitchRad = jau14ToRadians(cameraPitch).toFloat()
+        val yawRad = jau14ToRadians(cameraYaw).toFloat()
+        val dirX = sin(yawRad) * cos(pitchRad)
+        val dirY = -sin(pitchRad)
+        val dirZ = cos(yawRad) * cos(pitchRad)
+        return Triple(dirX, dirY, dirZ)
+    }
+
+    /** Lumina [RayTracingPipeline] view direction from pitch/yaw (unit vector). */
+    fun luminaLookDirection(pitch: Float, yaw: Float): Triple<Float, Float, Float> {
+        val cp = cos(pitch)
+        val sp = sin(pitch)
+        val sy = sin(yaw)
+        val cy = cos(yaw)
+        return Triple(cp * sy, -sp, -cp * cy)
+    }
+
+    private fun normalizeAnglePi(angle: Float): Float {
+        var a = angle
+        while (a > PI) a -= (2 * PI).toFloat()
+        while (a < -PI) a += (2 * PI).toFloat()
+        return a
+    }
+
     fun mapRegionsKey(mapRegions: IntArray): String =
-        mapRegions.copyOf().sorted().joinToString(",")
+        normalizeRegionIds(mapRegions).sorted().joinToString(",")
 }

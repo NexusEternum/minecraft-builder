@@ -343,6 +343,21 @@ class AccelerationStructureManager @Inject constructor(
 
     fun getIndexTriBase(blasId: Int): Int = blasCache[blasId]?.indexTriBase ?: 0
 
+    /** Drop cached BLAS entries before rebuilding scene geometry (avoids stale GPU addresses). */
+    fun clearBlasCache() {
+        if (!ctx.rtSupported || blasCache.isEmpty()) {
+            blasCache.clear()
+            return
+        }
+        val dev = ctx.device!!
+        for (entry in blasCache.values) {
+            vkDestroyAccelerationStructureKHR(dev, entry.accelerationStructure, null)
+            vkDestroyBuffer(dev, entry.buffer, null)
+            vkFreeMemory(dev, entry.memory, null)
+        }
+        blasCache.clear()
+    }
+
     private fun getBufferAddress(dev: VkDevice, buffer: Long): Long {
         MemoryStack.stackPush().use { stack ->
             val addrInfo = VkBufferDeviceAddressInfo.calloc(stack)

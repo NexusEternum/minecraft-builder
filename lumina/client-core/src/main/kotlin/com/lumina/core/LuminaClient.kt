@@ -258,6 +258,8 @@ class LuminaClient(private val args: Array<String>) {
             snapshot.cameraZ,
             snapshot.cameraPitch,
             snapshot.cameraYaw,
+            snapshot.baseX,
+            snapshot.baseY,
             sceneOriginBaseX,
             sceneOriginBaseY
         )

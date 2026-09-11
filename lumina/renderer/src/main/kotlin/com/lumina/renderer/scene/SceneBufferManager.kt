@@ -46,6 +46,7 @@ class SceneBufferManager @Inject constructor(
         if (totalVertexFloats == 0) return
 
         destroyBuffers()
+        accelStructure.clearBlasCache()
 
         val vertexSize = totalVertexFloats.toLong() * 4
         val indexSize = totalIndices.toLong() * 4
@@ -131,17 +132,16 @@ class SceneBufferManager @Inject constructor(
 
         accelStructure.setExpectedMeshNodeOrder(uploadNodeIds)
 
-        // Per-mesh indexTriBase for closest-hit shader (uses BLAS entry when geometry is deduplicated)
+        // Per-mesh indexTriBase for closest-hit shader (must match this mesh's slice in the combined index buffer)
         for (info in meshInfos) {
-            val indexTriBase = accelStructure.getIndexTriBase(info.mesh.blasId)
-            instanceInfoData.putInt(indexTriBase)
+            instanceInfoData.putInt(info.localIndexTriBase)
             log.info(
                 "mesh[{}] {} id={} albedo=({},{},{}) emissive=({},{},{}) rough={} metal={} blas=0x{} triBase={}",
                 info.materialIndex, info.node.name, info.node.id,
                 info.mat.albedo[0], info.mat.albedo[1], info.mat.albedo[2],
                 info.mat.emissive[0], info.mat.emissive[1], info.mat.emissive[2],
                 info.mat.roughness, info.mat.metallic,
-                Integer.toHexString(info.mesh.blasId), indexTriBase
+                Integer.toHexString(info.mesh.blasId), info.localIndexTriBase
             )
         }
         instanceInfoData.flip()

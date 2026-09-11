@@ -70,6 +70,12 @@ class OsrsMapLoader @Inject constructor(
         sceneOriginBaseX = originBaseX
         sceneOriginBaseY = originBaseY
 
+        val validRegionIds = OsrsCoordinateMapper.normalizeRegionIds(regionIds)
+        if (validRegionIds.isEmpty()) {
+            log.warn("No valid region IDs in {}", regionIds.contentToString())
+            return false
+        }
+
         return try {
             Store(cacheDir).use { store ->
                 store.load()
@@ -93,7 +99,7 @@ class OsrsMapLoader @Inject constructor(
                 var totalTerrainTriangles = 0
                 var totalObjects = 0
 
-                for (regionId in regionIds) {
+                for (regionId in validRegionIds) {
                     val mapDef = try {
                         regionLoader.loadMapDef(regionId)
                     } catch (e: Exception) {
@@ -323,14 +329,16 @@ class OsrsMapLoader @Inject constructor(
                         skippedNoModel++
                         continue
                     }
-                    mesh = modelDefinitionToMesh(modelDef, orientation)
-                    if (mesh.triangleCount == 0) {
+                    val built = modelDefinitionToMesh(modelDef, orientation)
+                    if (built.triangleCount == 0) {
                         skippedNoModel++
                         continue
                     }
-                    meshCache[cacheKey] = mesh
+                    meshCache[cacheKey] = built
+                    mesh = built
                 } else {
                     dedupedMeshes++
+                    mesh = meshCache[cacheKey]!!
                 }
 
                 val localTileX = position.x - baseX
@@ -355,7 +363,7 @@ class OsrsMapLoader @Inject constructor(
                         z = worldZ
                     )
                 )
-                node.addComponent(mesh)
+                node.addComponent(cloneMesh(mesh))
                 node.addComponent(
                     MaterialComponent(
                         albedo = floatArrayOf(1f, 1f, 1f),
@@ -670,6 +678,10 @@ class OsrsMapLoader @Inject constructor(
 
         return MeshComponent(verts, indices, vertexCount, triangleCount)
     }
+
+    /** Each scene node needs its own mesh so BLAS/index ranges are not shared via object dedup cache. */
+    private fun cloneMesh(mesh: MeshComponent): MeshComponent =
+        MeshComponent(mesh.vertexData.copyOf(), mesh.indexData.copyOf(), mesh.vertexCount, mesh.triangleCount)
 
     private fun packTileColorToUv(color: FloatArray): Float {
         val r = (color[0] * 255f).toInt().coerceIn(0, 255)
