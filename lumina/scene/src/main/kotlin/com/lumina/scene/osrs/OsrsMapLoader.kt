@@ -409,16 +409,18 @@ class OsrsMapLoader @Inject constructor(
                     mesh = meshCache[cacheKey]!!
                 }
 
-                val localTileX = position.x - baseX
-                val localTileY = position.y - baseY
+                // Region.loadLocations() stores absolute world tile coords (region base + loc-local).
+                val worldTileX = position.x
+                val worldTileY = position.y
+                val localTileX = worldTileX - baseX
+                val localTileY = worldTileY - baseY
                 if (localTileX !in 0 until REGION_SIZE || localTileY !in 0 until REGION_SIZE) {
                     continue
                 }
 
-                val (worldX, worldZ) = OsrsCoordinateMapper.regionLocalTileToLuminaXZ(
-                    localTileX,
-                    localTileY,
-                    regionId,
+                val (worldX, worldZ) = OsrsCoordinateMapper.worldTileToLuminaXZ(
+                    worldTileX.toFloat(),
+                    worldTileY.toFloat(),
                     originBaseX,
                     originBaseY
                 )

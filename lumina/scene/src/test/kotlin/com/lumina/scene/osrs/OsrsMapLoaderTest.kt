@@ -7,9 +7,11 @@ import com.lumina.scene.graph.Transform
 import net.runelite.cache.models.JagexColor
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import kotlin.math.abs
 import java.io.File
 
 class OsrsMapLoaderTest {
@@ -86,6 +88,59 @@ class OsrsMapLoaderTest {
         val heightUnits = 384
         val planeY = OsrsCoordinateMapper.luminaYFromHeightUnits128(heightUnits)
         assertEquals(-384 / 128f * OsrsMapLoader.TILE_SCALE, planeY, 0.001f)
+    }
+
+    /**
+     * Varrock fountain tile (region 12853, local 13/36): terrain and objects must share lumina XZ.
+     * Region.loadLocations() stores world tiles; passing them into regionLocalTileToLuminaXZ as
+     * region-local (b16 regression) double-adds the region base (~3200 tiles → horizon cluster).
+     */
+    @Test
+    fun objectAtWorldTileMatchesTerrainPlacementAtVarrockFountain() {
+        val originBaseX = 3161
+        val originBaseY = 3376
+        val regionId = 12853
+        val localTileX = 13
+        val localTileY = 36
+        val (regionBaseX, regionBaseY) = OsrsCoordinateMapper.regionOriginTiles(regionId)
+        val worldTileX = regionBaseX + localTileX
+        val worldTileY = regionBaseY + localTileY
+
+        assertEquals(3213, worldTileX)
+        assertEquals(3428, worldTileY)
+
+        val (terrainX, terrainZ) = OsrsCoordinateMapper.regionLocalTileToLuminaXZ(
+            localTileX,
+            localTileY,
+            regionId,
+            originBaseX,
+            originBaseY
+        )
+        assertEquals(133.12f, terrainX, 0.01f)
+        assertEquals(-133.12f, terrainZ, 0.01f)
+
+        val (objectX, objectZ) = OsrsCoordinateMapper.worldTileToLuminaXZ(
+            worldTileX.toFloat(),
+            worldTileY.toFloat(),
+            originBaseX,
+            originBaseY
+        )
+        assertEquals(terrainX, objectX, 0.001f, "object X must match terrain at same tile")
+        assertEquals(terrainZ, objectZ, 0.001f, "object Z must match terrain at same tile")
+
+        val (buggyX, buggyZ) = OsrsCoordinateMapper.regionLocalTileToLuminaXZ(
+            worldTileX,
+            worldTileY,
+            regionId,
+            originBaseX,
+            originBaseY
+        )
+        assertFalse(
+            abs(terrainX - buggyX) < 1f,
+            "world tile coords mistaken for region-local must not match terrain (regression guard)"
+        )
+        assertEquals(8325.12f, buggyX, 0.01f)
+        assertEquals(-8816.64f, buggyZ, 0.01f)
     }
 }
 
