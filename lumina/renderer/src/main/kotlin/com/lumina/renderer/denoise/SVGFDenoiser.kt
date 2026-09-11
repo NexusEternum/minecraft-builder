@@ -26,8 +26,10 @@ class SVGFDenoiser @Inject constructor(
 
     // Must stay ODD so the final A-Trous pass writes to bloomScratchA (post-process input).
     var atrousIterations: Int = 3
-    var temporalAlpha: Float = 0.1f
-    var momentAlpha: Float = 0.3f
+    /** Minimum blend floor for color temporal accumulation (alpha = max(1/historyLen, temporalAlpha)). */
+    var temporalAlpha: Float = 0.03f
+    /** Minimum blend floor for moment accumulation (alpha = max(1/historyLen, momentAlpha)). */
+    var momentAlpha: Float = 0.1f
     var sigmaLuminance: Float = 3.0f
     var sigmaNormal: Float = 128.0f
     var sigmaDepth: Float = 1.0f
@@ -54,7 +56,7 @@ class SVGFDenoiser @Inject constructor(
         )
         temporalPipeline = ComputePipelineFactory.create(
             ctx, shaderCompiler, "/shaders/denoise/svgf_temporal.comp", bindings,
-            pushConstantSize = 12 // alpha(4) + momentAlpha(4) + frameCount(4)
+            pushConstantSize = 12 // minAlpha(4) + minMomentAlpha(4) + frameCount(4)
         )
     }
 
