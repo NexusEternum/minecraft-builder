@@ -164,7 +164,7 @@ void main() {
     }
 
     vec3 sunDir = normalize(vec3(0.5, 0.8, 0.3));
-    vec3 sunColor = vec3(1.4, 1.2, 1.0);
+    vec3 sunColor = vec3(3.0, 2.7, 2.2);
 
     shadowed = true;
     traceRayEXT(topLevelAS,

@@ -21,7 +21,7 @@ class PostProcessStack @Inject constructor(
     var bloomThreshold: Float = 1.3f
 
     var volumetricFogEnabled: Boolean = true
-    var fogDensity: Float = 0.0012f
+    var fogDensity: Float = 0.0008f
     var fogColor: FloatArray = floatArrayOf(0.7f, 0.75f, 0.85f)
     var fogHeight: Float = 50.0f
 
@@ -33,7 +33,7 @@ class PostProcessStack @Inject constructor(
     var sunDirection: FloatArray = floatArrayOf(0.3f, 0.8f, 0.5f)
     var sunColor: FloatArray = floatArrayOf(1.0f, 0.95f, 0.85f)
 
-    var toneMappingMode: ToneMapMode = ToneMapMode.AGX
+    var toneMappingMode: ToneMapMode = ToneMapMode.ACES
     var exposure: Float = 1.0f
     var gamma: Float = 2.2f
 
