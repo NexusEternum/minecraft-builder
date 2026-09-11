@@ -119,7 +119,7 @@ vec3 sampleGGX(vec3 normal, float roughness, inout uint seed) {
 
 // Cook-Torrance BRDF
 vec3 evaluatePBR(vec3 N, vec3 V, vec3 L, vec3 albedo, float roughness, float metallic) {
-    roughness = max(roughness, 0.08);
+    roughness = max(roughness, 0.04);
     vec3 H = normalize(V + L);
     float NdotL = max(dot(N, L), 0.0);
     float NdotV = max(dot(N, V), 0.0);
@@ -204,7 +204,7 @@ void main() {
     vec3 sunColor = vec3(3.0, 2.7, 2.2);
     vec3 sunDir = sampleSunDirection(sunCenter, payload.seed);
 
-    // v1 approximation — glass transmits 100% untinted; tinting via any-hit is future work.
+    // v1 approximation — opaque-only shadow ray; glass attenuation via second translucent-only ray below.
     shadowed = true;
     traceRayEXT(topLevelAS,
         gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT,
@@ -221,6 +221,18 @@ void main() {
         // fade out the analytic highlight to avoid double-counting and fireflies.
         if (metallic > 0.5 && roughness < 0.15) {
             directLight *= roughness / 0.15;
+        }
+
+        // Second ray: translucent-only (mask 0x2). If stained glass is in the sun path,
+        // attenuate and tint. True per-pane tint needs an any-hit/hit-shader fetch — future work.
+        shadowed = true;
+        traceRayEXT(topLevelAS,
+            gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT,
+            0x02, 0, 0, 1,
+            worldPos + normal * 0.001,
+            0.001, sunDir, 10000.0, 1);
+        if (shadowed) {
+            directLight *= 0.5 * vec3(0.65, 0.85, 0.7);
         }
     }
 

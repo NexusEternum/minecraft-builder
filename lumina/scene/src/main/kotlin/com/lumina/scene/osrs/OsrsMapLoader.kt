@@ -266,7 +266,7 @@ class OsrsMapLoader @Inject constructor(
                     val startX = chunkX * CHUNK_SIZE
                     val startY = chunkY * CHUNK_SIZE
 
-                    val mesh = buildChunkMesh(
+                    val (terrainMesh, waterMesh) = buildChunkMeshes(
                         region,
                         plane,
                         startX,
@@ -279,22 +279,38 @@ class OsrsMapLoader @Inject constructor(
                         originBaseY,
                         locationTilesByPlane[plane]
                     )
-                    if (mesh.triangleCount == 0) continue
 
-                    val node = sceneGraph.createNode("terrain_${regionId}_p${plane}_${chunkX}_${chunkY}")
-                    node.addComponent(Transform())
-                    node.addComponent(mesh)
-                    node.addComponent(
-                        MaterialComponent(
-                            albedo = floatArrayOf(1f, 1f, 1f),
-                            roughness = 0.9f,
-                            metallic = 2.0f
+                    if (terrainMesh.triangleCount > 0) {
+                        val node = sceneGraph.createNode("terrain_${regionId}_p${plane}_${chunkX}_${chunkY}")
+                        node.addComponent(Transform())
+                        node.addComponent(terrainMesh)
+                        node.addComponent(
+                            MaterialComponent(
+                                albedo = floatArrayOf(1f, 1f, 1f),
+                                roughness = 0.9f,
+                                metallic = 2.0f
+                            )
                         )
-                    )
+                        tileCount += terrainMesh.triangleCount / 2
+                        terrainTriangleCount += terrainMesh.triangleCount
+                        terrainMeshCount++
+                    }
 
-                    tileCount += mesh.triangleCount / 2
-                    terrainTriangleCount += mesh.triangleCount
-                    terrainMeshCount++
+                    if (waterMesh.triangleCount > 0) {
+                        val waterNode = sceneGraph.createNode("water_${regionId}_p${plane}_${chunkX}_${chunkY}")
+                        waterNode.addComponent(Transform())
+                        waterNode.addComponent(waterMesh)
+                        waterNode.addComponent(
+                            MaterialComponent(
+                                albedo = OsrsWaterOverlay.ALBEDO_LINEAR.copyOf(),
+                                roughness = OsrsWaterOverlay.ROUGHNESS,
+                                metallic = OsrsWaterOverlay.METALLIC
+                            )
+                        )
+                        tileCount += waterMesh.triangleCount / 2
+                        terrainTriangleCount += waterMesh.triangleCount
+                        terrainMeshCount++
+                    }
                 }
             }
         }
@@ -658,7 +674,20 @@ class OsrsMapLoader @Inject constructor(
         return null
     }
 
-    private fun buildChunkMesh(
+    private fun isWaterTile(
+        region: Region,
+        plane: Int,
+        tileX: Int,
+        tileY: Int,
+        overlayManager: OverlayManager
+    ): Boolean {
+        val overlayId = region.getOverlayId(plane, tileX, tileY)
+        if (overlayId <= 0) return false
+        val overlay = overlayManager.provide(overlayId) ?: return false
+        return OsrsWaterOverlay.isWaterOverlay(overlay)
+    }
+
+    private fun buildChunkMeshes(
         region: Region,
         plane: Int,
         startX: Int,
@@ -670,14 +699,20 @@ class OsrsMapLoader @Inject constructor(
         originBaseX: Int,
         originBaseY: Int,
         locationTiles: Set<Long>
-    ): MeshComponent {
+    ): Pair<MeshComponent, MeshComponent> {
         val tilesPerChunk = CHUNK_SIZE * CHUNK_SIZE
-        val verts = FloatArray(tilesPerChunk * 4 * FLOATS_PER_VERTEX)
-        val indices = IntArray(tilesPerChunk * 2 * 3)
+        val terrainVerts = FloatArray(tilesPerChunk * 4 * FLOATS_PER_VERTEX)
+        val terrainIndices = IntArray(tilesPerChunk * 2 * 3)
+        val waterVerts = FloatArray(tilesPerChunk * 4 * FLOATS_PER_VERTEX)
+        val waterIndices = IntArray(tilesPerChunk * 2 * 3)
 
-        var vi = 0
-        var ii = 0
-        var builtTiles = 0
+        var terrainVi = 0
+        var terrainIi = 0
+        var terrainTiles = 0
+        var waterVi = 0
+        var waterIi = 0
+        var waterTiles = 0
+
         for (localY in 0 until CHUNK_SIZE) {
             for (localX in 0 until CHUNK_SIZE) {
                 val tileX = startX + localX
@@ -693,9 +728,18 @@ class OsrsMapLoader @Inject constructor(
                     continue
                 }
 
-                val packedColor = packTileColorToUv(
-                    tileColor(region, plane, tileX, tileY, underlayManager, overlayManager, textureColors)
-                )
+                val water = isWaterTile(region, plane, tileX, tileY, overlayManager)
+                val packedColor = if (water) {
+                    0f
+                } else {
+                    packTileColorToUv(
+                        tileColor(region, plane, tileX, tileY, underlayManager, overlayManager, textureColors)
+                    )
+                }
+
+                val verts = if (water) waterVerts else terrainVerts
+                var vi = if (water) waterVi else terrainVi
+                var ii = if (water) waterIi else terrainIi
                 val baseVertex = vi
 
                 for (corner in TILE_CORNERS) {
@@ -725,21 +769,49 @@ class OsrsMapLoader @Inject constructor(
                     vi++
                 }
 
+                val indices = if (water) waterIndices else terrainIndices
                 indices[ii++] = baseVertex
                 indices[ii++] = baseVertex + 2
                 indices[ii++] = baseVertex + 1
                 indices[ii++] = baseVertex
                 indices[ii++] = baseVertex + 3
                 indices[ii++] = baseVertex + 2
-                builtTiles++
+
+                if (water) {
+                    waterVi = vi
+                    waterIi = ii
+                    waterTiles++
+                } else {
+                    terrainVi = vi
+                    terrainIi = ii
+                    terrainTiles++
+                }
             }
         }
 
-        if (builtTiles == 0) {
-            return MeshComponent(FloatArray(0), IntArray(0), 0, 0)
+        val terrainMesh = if (terrainTiles == 0) {
+            MeshComponent(FloatArray(0), IntArray(0), 0, 0)
+        } else {
+            MeshComponent(
+                terrainVerts.copyOf(terrainVi * FLOATS_PER_VERTEX),
+                terrainIndices.copyOf(terrainIi),
+                terrainVi,
+                terrainTiles * 2
+            )
         }
 
-        return MeshComponent(verts.copyOf(vi * FLOATS_PER_VERTEX), indices.copyOf(ii), vi, builtTiles * 2)
+        val waterMesh = if (waterTiles == 0) {
+            MeshComponent(FloatArray(0), IntArray(0), 0, 0)
+        } else {
+            MeshComponent(
+                waterVerts.copyOf(waterVi * FLOATS_PER_VERTEX),
+                waterIndices.copyOf(waterIi),
+                waterVi,
+                waterTiles * 2
+            )
+        }
+
+        return terrainMesh to waterMesh
     }
 
     private fun packTileColorToUv(color: FloatArray): Float {
