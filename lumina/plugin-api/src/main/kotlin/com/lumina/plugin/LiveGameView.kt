@@ -19,7 +19,12 @@ data class LiveGameSnapshot(
     /** Pitch in JAU14 (0x4000 units per full revolution). */
     val cameraPitch: Int,
     /** Yaw in JAU14 (0x4000 units per full revolution). */
-    val cameraYaw: Int
+    val cameraYaw: Int,
+    /** Local player position in scene coords; 1/128 tile units (LocalPoint). */
+    val playerLocalX: Int,
+    val playerLocalY: Int,
+    /** Local player render plane (0..3). */
+    val playerPlane: Int
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -33,7 +38,10 @@ data class LiveGameSnapshot(
             cameraY == other.cameraY &&
             cameraZ == other.cameraZ &&
             cameraPitch == other.cameraPitch &&
-            cameraYaw == other.cameraYaw
+            cameraYaw == other.cameraYaw &&
+            playerLocalX == other.playerLocalX &&
+            playerLocalY == other.playerLocalY &&
+            playerPlane == other.playerPlane
     }
 
     override fun hashCode(): Int {
@@ -47,6 +55,9 @@ data class LiveGameSnapshot(
         result = 31 * result + cameraZ
         result = 31 * result + cameraPitch
         result = 31 * result + cameraYaw
+        result = 31 * result + playerLocalX
+        result = 31 * result + playerLocalY
+        result = 31 * result + playerPlane
         return result
     }
 }

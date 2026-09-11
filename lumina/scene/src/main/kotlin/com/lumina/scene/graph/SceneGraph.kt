@@ -36,6 +36,8 @@ class SceneGraph {
 
     fun clearDirty() { dirty = false }
 
+    fun markDirty() { dirty = true }
+
     fun clear() {
         entities.clear()
         dirty = true

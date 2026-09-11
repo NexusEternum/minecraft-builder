@@ -30,12 +30,12 @@ class OsrsMapLoaderTest {
     @Test
     fun regionWorldOffsetMatchesKnownRegionId() {
         val (ox, oz) = OsrsCoordinateMapper.regionWorldOffset(12850, 3200, 3200)
-        assertEquals(0f, ox)
-        assertEquals(0f, oz)
+        assertEquals(0f, ox, 0.001f)
+        assertEquals(0f, oz, 0.001f)
 
         val (eastX, eastZ) = OsrsCoordinateMapper.regionWorldOffset(13106, 3200, 3200)
-        assertEquals(64f * OsrsMapLoader.TILE_SCALE, eastX)
-        assertEquals(0f, eastZ)
+        assertEquals(64f * OsrsMapLoader.TILE_SCALE, eastX, 0.001f)
+        assertEquals(0f, eastZ, 0.001f)
     }
 
     @Test
@@ -65,6 +65,21 @@ class OsrsMapLoaderTest {
         assertEquals(5f, transforms[1].x)
         assertEquals(2f, transforms[0].z)
         assertEquals(8f, transforms[1].z)
+    }
+
+    @Test
+    fun upperPlaneTileFilterRequiresOverlayUnderlayOrLocation() {
+        assertTrue(OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 1, underlayId = 0, hasLocation = false))
+        assertTrue(OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 0, underlayId = 2, hasLocation = false))
+        assertTrue(OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 0, underlayId = 0, hasLocation = true))
+        assertFalse(OsrsMapLoader.shouldRenderUpperPlaneTile(overlayId = 0, underlayId = 0, hasLocation = false))
+    }
+
+    @Test
+    fun objectHeightUsesPlaneSpecificSampleFormula() {
+        val heightUnits = 384
+        val planeY = OsrsCoordinateMapper.luminaYFromHeightUnits128(heightUnits)
+        assertEquals(-384 / 128f * OsrsMapLoader.TILE_SCALE, planeY, 0.001f)
     }
 }
 

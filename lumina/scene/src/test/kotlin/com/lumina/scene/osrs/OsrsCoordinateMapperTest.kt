@@ -2,6 +2,7 @@ package com.lumina.scene.osrs
 
 import net.runelite.cache.models.JagexColor
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.math.PI
@@ -58,6 +59,112 @@ class OsrsCoordinateMapperTest {
     }
 
     @Test
+    fun cameraOnKnownTileMatchesRegionLocalGeometryPlacement() {
+        val originBaseX = 3152
+        val originBaseY = 3488
+        val regionId = 12850
+        val localTileX = 40
+        val localTileY = 25
+
+        val (geoX, geoZ) = OsrsCoordinateMapper.regionLocalTileToLuminaXZ(
+            localTileX,
+            localTileY,
+            regionId,
+            originBaseX,
+            originBaseY
+        )
+
+        val (regionBaseX, regionBaseY) = OsrsCoordinateMapper.regionOriginTiles(regionId)
+        val worldTileX = regionBaseX + localTileX
+        val worldTileY = regionBaseY + localTileY
+        val cameraLocalX = (worldTileX - originBaseX) * 128
+        val cameraLocalY = (worldTileY - originBaseY) * 128
+
+        val cam = OsrsCoordinateMapper.cameraToLumina(
+            cameraX = cameraLocalX,
+            cameraY = cameraLocalY,
+            cameraZ = 0,
+            cameraPitch = 0,
+            cameraYaw = 0,
+            baseX = originBaseX,
+            baseY = originBaseY,
+            originBaseX = originBaseX,
+            originBaseY = originBaseY
+        )
+
+        assertEquals(geoX, cam.x, 0.001f, "camera X must match geometry tile placement")
+        assertEquals(geoZ, cam.z, 0.001f, "camera Z must match geometry tile placement (north = -Z)")
+    }
+
+    @Test
+    fun worldTileTransformMatchesRegionOffsetPlusLocalTile() {
+        val originBaseX = 3152
+        val originBaseY = 3488
+        val regionId = 12906
+        val localTileX = 10
+        val localTileY = 20
+
+        val (fromLocal, fromWorld) = run {
+            val a = OsrsCoordinateMapper.regionLocalTileToLuminaXZ(
+                localTileX, localTileY, regionId, originBaseX, originBaseY
+            )
+            val (rbx, rby) = OsrsCoordinateMapper.regionOriginTiles(regionId)
+            val b = OsrsCoordinateMapper.worldTileToLuminaXZ(
+                (rbx + localTileX).toFloat(),
+                (rby + localTileY).toFloat(),
+                originBaseX,
+                originBaseY
+            )
+            a to b
+        }
+
+        assertEquals(fromLocal.first, fromWorld.first, 0.001f)
+        assertEquals(fromLocal.second, fromWorld.second, 0.001f)
+    }
+
+    @Test
+    fun centerRegionTileAlignsWhenSceneBaseIsNotRegionAligned() {
+        val originBaseX = 3152
+        val originBaseY = 3456
+        val centerRegionId = 12906
+        val localTileX = 32
+        val localTileY = 32
+
+        val (luminaX, luminaZ) = OsrsCoordinateMapper.regionLocalTileToLuminaXZ(
+            localTileX,
+            localTileY,
+            centerRegionId,
+            originBaseX,
+            originBaseY
+        )
+
+        val (regionBaseX, regionBaseY) = OsrsCoordinateMapper.regionOriginTiles(centerRegionId)
+        val worldTileX = regionBaseX + localTileX
+        val worldTileY = regionBaseY + localTileY
+
+        val cam = OsrsCoordinateMapper.cameraToLumina(
+            cameraX = (worldTileX - originBaseX) * 128,
+            cameraY = (worldTileY - originBaseY) * 128,
+            cameraZ = 0,
+            cameraPitch = 0,
+            cameraYaw = 0,
+            baseX = originBaseX,
+            baseY = originBaseY,
+            originBaseX = originBaseX,
+            originBaseY = originBaseY
+        )
+
+        assertEquals(luminaX, cam.x, 0.001f)
+        assertEquals(luminaZ, cam.z, 0.001f)
+
+        val (offsetX, offsetZ) = OsrsCoordinateMapper.regionWorldOffset(centerRegionId, originBaseX, originBaseY)
+        val legacyX = localTileX * OsrsMapLoader.TILE_SCALE + offsetX
+        val legacyZ = offsetZ - localTileY * OsrsMapLoader.TILE_SCALE
+        assertEquals(luminaX, legacyX, 0.001f)
+        assertEquals(luminaZ, legacyZ, 0.001f)
+    }
+
+    @Test
     fun osrsYawZeroForwardIsNorthMinusZ() {
         val (fx, fy, fz) = OsrsCoordinateMapper.osrsForwardVectorLumina(0, 0)
         assertEquals(0f, fx, 0.001f)
@@ -81,8 +188,11 @@ class OsrsCoordinateMapperTest {
 
     @Test
     fun tileCenterNorthDecreasesZ() {
-        val (x0, _, z0) = OsrsCoordinateMapper.tileCenterLumina(10, 10, 0f, 0f)
-        val (_, _, z1) = OsrsCoordinateMapper.tileCenterLumina(10, 11, 0f, 0f)
+        val regionId = 12850
+        val originBaseX = 3200
+        val originBaseY = 3200
+        val (x0, _, z0) = OsrsCoordinateMapper.tileCenterLumina(10, 10, regionId, originBaseX, originBaseY)
+        val (_, _, z1) = OsrsCoordinateMapper.tileCenterLumina(10, 11, regionId, originBaseX, originBaseY)
         assertEquals(10f * OsrsMapLoader.TILE_SCALE, x0, 0.001f)
         assertTrue(z1 < z0, "Moving north (tileY+1) must decrease Lumina Z")
         assertEquals(OsrsMapLoader.TILE_SCALE, z0 - z1, 0.001f)
@@ -129,5 +239,11 @@ class OsrsCoordinateMapperTest {
         val a = intArrayOf(12850, 0, 12906, 12851)
         val b = intArrayOf(12906, 12851, 12850)
         assertEquals(OsrsCoordinateMapper.mapRegionsKey(a), OsrsCoordinateMapper.mapRegionsKey(b))
+    }
+
+    @Test
+    fun luminaYFromHeightUnits128NegatesOsrsUp() {
+        assertEquals(-2.56f, OsrsCoordinateMapper.luminaYFromHeightUnits128(128), 0.001f)
+        assertEquals(0f, OsrsCoordinateMapper.luminaYFromHeightUnits128(0), 0.001f)
     }
 }

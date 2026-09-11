@@ -37,7 +37,7 @@ object OsrsCoordinateMapper {
 
     /**
      * Region SW corner in world tile coords from a packed region id.
-     * OSRS convention: regionX = id >> 8, regionY = id & 0xFF; each region is 64x64 tiles.
+     * OSRS convention: regionX = id >> 8, regionY = id & 0xFF; each region is 64×64 tiles.
      */
     fun regionOriginTiles(regionId: Int): Pair<Int, Int> {
         val regionX = (regionId shr 8) and 0xFF
@@ -46,19 +46,54 @@ object OsrsCoordinateMapper {
     }
 
     /**
-     * Lumina placement offset for a region relative to the scene-local origin.
-     * Z offset is negated so north (OSRS +Y) maps to Lumina −Z.
+     * Shared horizontal placement: world tile → Lumina XZ relative to scene origin.
+     *
+     * Derivation (must match [OsrsMapLoader] terrain/object placement after b15 Z-flip):
+     *   worldTileX = regionBaseX + localTileX
+     *   luminaX = (worldTileX − originBaseX) × TILE_SCALE
+     *   luminaZ = −(worldTileY − originBaseY) × TILE_SCALE   // north (OSRS +Y) → Lumina −Z
      */
-    fun regionWorldOffset(
+    fun worldTileToLuminaXZ(
+        worldTileX: Float,
+        worldTileY: Float,
+        originBaseX: Int,
+        originBaseY: Int
+    ): Pair<Float, Float> {
+        val luminaX = (worldTileX - originBaseX) * TILE_SCALE
+        val luminaZ = -(worldTileY - originBaseY) * TILE_SCALE
+        return luminaX to luminaZ
+    }
+
+    /** Region-local tile (0..63) → Lumina XZ via [worldTileToLuminaXZ]. */
+    fun regionLocalTileToLuminaXZ(
+        localTileX: Int,
+        localTileY: Int,
         regionId: Int,
         originBaseX: Int,
         originBaseY: Int
     ): Pair<Float, Float> {
         val (regionBaseX, regionBaseY) = regionOriginTiles(regionId)
-        val offsetX = (regionBaseX - originBaseX) * TILE_SCALE
-        val offsetZ = -(regionBaseY - originBaseY) * TILE_SCALE
-        return offsetX to offsetZ
+        return worldTileToLuminaXZ(
+            regionBaseX + localTileX.toFloat(),
+            regionBaseY + localTileY.toFloat(),
+            originBaseX,
+            originBaseY
+        )
     }
+
+    /**
+     * Lumina placement offset for a region relative to the scene-local origin.
+     * Equivalent to [regionLocalTileToLuminaXZ](0, 0, regionId, originBaseX, originBaseY).
+     */
+    fun regionWorldOffset(
+        regionId: Int,
+        originBaseX: Int,
+        originBaseY: Int
+    ): Pair<Float, Float> = regionLocalTileToLuminaXZ(0, 0, regionId, originBaseX, originBaseY)
+
+    /** Vertical OSRS height (1/128 tile units, same as tile heights / cameraZ) → Lumina Y. */
+    fun luminaYFromHeightUnits128(heightUnits: Int): Float =
+        -heightUnits / 128f * TILE_SCALE
 
     /** Valid, unique region IDs from a client [Client.getMapRegions] array (drops 0 / negative). */
     fun normalizeRegionIds(mapRegions: IntArray): IntArray =
@@ -69,8 +104,21 @@ object OsrsCoordinateMapper {
     /** Local scene tile coords (0..104) from 1/128-tile local units. */
     fun localUnitsToSceneTiles(localUnits: Int): Float = localUnits / 128f
 
+    /** World tile coords from scene SW base + local 1/128-tile units. */
+    fun localSceneUnitsToWorldTiles(
+        baseX: Int,
+        baseY: Int,
+        localUnitsX: Int,
+        localUnitsY: Int
+    ): Pair<Float, Float> {
+        val worldTileX = baseX + localUnitsToSceneTiles(localUnitsX)
+        val worldTileY = baseY + localUnitsToSceneTiles(localUnitsY)
+        return worldTileX to worldTileY
+    }
+
     /**
      * Camera position and forward in Lumina world units relative to [originBaseX]/[originBaseY].
+     * Horizontal position uses the same [worldTileToLuminaXZ] transform as map geometry.
      */
     fun cameraToLumina(
         cameraX: Int,
@@ -83,11 +131,9 @@ object OsrsCoordinateMapper {
         originBaseX: Int,
         originBaseY: Int
     ): LuminaCamera {
-        val sceneTileX = localUnitsToSceneTiles(cameraX)
-        val sceneTileY = localUnitsToSceneTiles(cameraY)
-        val luminaX = (baseX + sceneTileX - originBaseX) * TILE_SCALE
-        val luminaZ = -(baseY + sceneTileY - originBaseY) * TILE_SCALE
-        val luminaY = -localUnitsToSceneTiles(cameraZ) * TILE_SCALE
+        val (worldTileX, worldTileY) = localSceneUnitsToWorldTiles(baseX, baseY, cameraX, cameraY)
+        val (luminaX, luminaZ) = worldTileToLuminaXZ(worldTileX, worldTileY, originBaseX, originBaseY)
+        val luminaY = luminaYFromHeightUnits128(cameraZ)
 
         val (fx, fy, fz) = osrsForwardVectorLumina(cameraPitch, cameraYaw)
         return LuminaCamera(luminaX, luminaY, luminaZ, fx, fy, fz)
@@ -120,9 +166,14 @@ object OsrsCoordinateMapper {
     }
 
     /** Lumina tile centre in world units for a region-local tile coordinate. */
-    fun tileCenterLumina(localTileX: Int, localTileY: Int, worldOffsetX: Float, worldOffsetZ: Float): Triple<Float, Float, Float> {
-        val x = localTileX * TILE_SCALE + worldOffsetX
-        val z = worldOffsetZ - localTileY * TILE_SCALE
+    fun tileCenterLumina(
+        localTileX: Int,
+        localTileY: Int,
+        regionId: Int,
+        originBaseX: Int,
+        originBaseY: Int
+    ): Triple<Float, Float, Float> {
+        val (x, z) = regionLocalTileToLuminaXZ(localTileX, localTileY, regionId, originBaseX, originBaseY)
         return Triple(x, 0f, z)
     }
 

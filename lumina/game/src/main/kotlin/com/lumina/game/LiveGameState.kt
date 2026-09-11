@@ -19,6 +19,9 @@ import java.util.concurrent.atomic.AtomicReference
  *   see Client javadoc and Perspective.UNIT14).
  * - [Client.getBaseX]/[getBaseY]: SW corner of the loaded scene in world tile coordinates.
  * - [Client.getMapRegions]: region IDs currently loaded (typically up to nine).
+ *
+ * Each [LiveGameSnapshot] captures base, regions, camera, and player in one poll so consumers
+ * never mix stale scene origin with current region lists.
  */
 class LiveGameState : LiveGameView {
     private val log = LoggerFactory.getLogger(LiveGameState::class.java)
@@ -93,6 +96,8 @@ class LiveGameState : LiveGameView {
     private fun readSnapshot(client: Client): LiveGameSnapshot {
         val gameState = client.gameState
         val loggedIn = gameState == GameState.LOGGED_IN
+        val (playerLocalX, playerLocalY, playerPlane) = readLocalPlayer(client, loggedIn)
+
         if (!loggedIn) {
             return LiveGameSnapshot(
                 loggedIn = false,
@@ -104,7 +109,10 @@ class LiveGameState : LiveGameView {
                 cameraY = safeCameraY(client),
                 cameraZ = safeCameraZ(client),
                 cameraPitch = safeCameraPitch(client),
-                cameraYaw = safeCameraYaw(client)
+                cameraYaw = safeCameraYaw(client),
+                playerLocalX = playerLocalX,
+                playerLocalY = playerLocalY,
+                playerPlane = playerPlane
             )
         }
 
@@ -121,8 +129,20 @@ class LiveGameState : LiveGameView {
             cameraY = client.cameraY,
             cameraZ = client.cameraZ,
             cameraPitch = client.cameraPitch,
-            cameraYaw = client.cameraYaw
+            cameraYaw = client.cameraYaw,
+            playerLocalX = playerLocalX,
+            playerLocalY = playerLocalY,
+            playerPlane = playerPlane
         )
+    }
+
+    private fun readLocalPlayer(client: Client, loggedIn: Boolean): Triple<Int, Int, Int> {
+        if (!loggedIn) return Triple(0, 0, 0)
+        return runCatching {
+            val player = client.localPlayer ?: return Triple(0, 0, 0)
+            val loc = player.localLocation ?: return Triple(0, 0, client.plane)
+            Triple(loc.x, loc.y, client.plane)
+        }.getOrDefault(Triple(0, 0, 0))
     }
 
     private fun safeCameraX(client: Client): Int =

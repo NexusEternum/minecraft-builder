@@ -14,12 +14,16 @@ import com.lumina.renderer.overlay.BUILD_STAMP
 import com.lumina.renderer.overlay.OverlayRenderer
 import com.lumina.renderer.scene.DemoScene
 import com.lumina.renderer.scene.SceneBufferManager
-import com.lumina.scene.osrs.OsrsCoordinateMapper
-import com.lumina.scene.osrs.OsrsMapLoader
+import com.lumina.scene.graph.MaterialComponent
+import com.lumina.scene.graph.MeshComponent
+import com.lumina.scene.graph.SceneGraph
+import com.lumina.scene.graph.Transform
 import org.lwjgl.glfw.GLFW.*
 import org.lwjgl.glfw.GLFWCursorPosCallbackI
 import org.lwjgl.glfw.GLFWFramebufferSizeCallbackI
 import org.lwjgl.glfw.GLFWKeyCallbackI
+import com.lumina.scene.osrs.OsrsCoordinateMapper
+import com.lumina.scene.osrs.OsrsMapLoader
 import org.slf4j.LoggerFactory
 import java.io.File
 
@@ -35,6 +39,7 @@ class LuminaClient(private val args: Array<String>) {
     private lateinit var overlay: OverlayRenderer
     private lateinit var demoScene: DemoScene
     private lateinit var osrsMapLoader: OsrsMapLoader
+    private lateinit var sceneGraph: SceneGraph
     @Volatile private var running = false
     private var resizeRequested = false
     private var newWidth = 0
@@ -48,7 +53,10 @@ class LuminaClient(private val args: Array<String>) {
     private var loadedRegionsKey: String? = null
     private var pendingRegionsKey: String? = null
     private var pendingRegionsStablePolls = 0
-    private var upperPlaneLogged = false
+    private var playerMarkerNodeId: Int? = null
+    private var lastPlayerMarkerX = Float.NaN
+    private var lastPlayerMarkerY = Float.NaN
+    private var lastPlayerMarkerZ = Float.NaN
 
     fun start() {
         if ("--game" in args && "--play" !in args) {
@@ -164,6 +172,7 @@ class LuminaClient(private val args: Array<String>) {
         sceneBufferManager = injector.getInstance(SceneBufferManager::class.java)
         overlay = injector.getInstance(OverlayRenderer::class.java)
         osrsMapLoader = injector.getInstance(OsrsMapLoader::class.java)
+        sceneGraph = injector.getInstance(SceneGraph::class.java)
 
         camera.manualControlEnabled = false
         camera.useYawPitchControl()
@@ -171,14 +180,22 @@ class LuminaClient(private val args: Array<String>) {
         renderer.init("Lumina LIVE - OSRS [build $BUILD_STAMP]", 1920, 1080)
         setupCallbacks()
 
-        sceneOriginBaseX = loginSnapshot.baseX
-        sceneOriginBaseY = loginSnapshot.baseY
-        if (!reloadLiveScene(loginSnapshot)) {
+        val loadSnapshot = liveGameView!!.latestSnapshot()?.takeIf { it.loggedIn } ?: loginSnapshot
+        if (loadSnapshot !== loginSnapshot) {
+            log.info(
+                "--play: using fresh snapshot for scene load (base=({}, {}) vs login=({}, {}))",
+                loadSnapshot.baseX,
+                loadSnapshot.baseY,
+                loginSnapshot.baseX,
+                loginSnapshot.baseY
+            )
+        }
+        if (!reloadLiveScene(loadSnapshot)) {
             log.error("--play: failed to load live scene regions; exiting")
             System.exit(1)
         }
 
-        syncCameraFromSnapshot(loginSnapshot)
+        syncCameraFromSnapshot(liveGameView!!.latestSnapshot()?.takeIf { it.loggedIn } ?: loadSnapshot)
 
         printControls()
         log.info("--play: mirror window open; camera sync enabled (F8 toggles free camera)")
@@ -242,6 +259,8 @@ class LuminaClient(private val args: Array<String>) {
         )
         if (!loaded) return false
 
+        setupPlayerMarker()
+
         sceneOriginBaseX = snapshot.baseX
         sceneOriginBaseY = snapshot.baseY
         loadedRegionsKey = OsrsCoordinateMapper.mapRegionsKey(snapshot.mapRegions)
@@ -279,12 +298,8 @@ class LuminaClient(private val args: Array<String>) {
         val snapshot = liveView.latestSnapshot() ?: return
         if (!snapshot.loggedIn) return
 
-        if (snapshot.plane != 0 && !upperPlaneLogged) {
-            log.info("--play: player on plane {} — rendering ground plane 0 only for now", snapshot.plane)
-            upperPlaneLogged = true
-        }
-
         maybeRebuildLiveScene(snapshot)
+        updatePlayerMarker(snapshot)
 
         if (cameraSyncEnabled) {
             syncCameraFromSnapshot(snapshot)
@@ -312,6 +327,95 @@ class LuminaClient(private val args: Array<String>) {
         if (reloadLiveScene(snapshot)) {
             syncCameraFromSnapshot(snapshot)
         }
+    }
+
+    private fun setupPlayerMarker() {
+        playerMarkerNodeId = null
+        lastPlayerMarkerX = Float.NaN
+        lastPlayerMarkerY = Float.NaN
+        lastPlayerMarkerZ = Float.NaN
+
+        val node = sceneGraph.createNode("player_marker")
+        playerMarkerNodeId = node.id
+        node.addComponent(
+            Transform(
+                scaleX = PLAYER_MARKER_SIZE,
+                scaleY = PLAYER_MARKER_SIZE,
+                scaleZ = PLAYER_MARKER_SIZE
+            )
+        )
+        node.addComponent(createPlayerMarkerMesh())
+        node.addComponent(
+            MaterialComponent(
+                albedo = floatArrayOf(1f, 0.9f, 0.2f),
+                roughness = 0.2f,
+                metallic = 0f,
+                emissive = floatArrayOf(4f, 3f, 1f)
+            )
+        )
+    }
+
+    private fun updatePlayerMarker(snapshot: LiveGameSnapshot) {
+        val nodeId = playerMarkerNodeId ?: return
+        val node = sceneGraph.getNode(nodeId) ?: return
+        val transform = node.getComponent(Transform::class.java) ?: return
+
+        val (worldTileX, worldTileY) = OsrsCoordinateMapper.localSceneUnitsToWorldTiles(
+            snapshot.baseX,
+            snapshot.baseY,
+            snapshot.playerLocalX,
+            snapshot.playerLocalY
+        )
+        val (luminaX, luminaZ) = OsrsCoordinateMapper.worldTileToLuminaXZ(
+            worldTileX,
+            worldTileY,
+            sceneOriginBaseX,
+            sceneOriginBaseY
+        )
+        val luminaY = OsrsCoordinateMapper.luminaYFromHeightUnits128(snapshot.playerPlane * PLANE_HEIGHT_UNITS) +
+            PLAYER_MARKER_SIZE * 0.5f
+
+        val dx = luminaX - lastPlayerMarkerX
+        val dy = luminaY - lastPlayerMarkerY
+        val dz = luminaZ - lastPlayerMarkerZ
+        val movedSq = dx * dx + dy * dy + dz * dz
+        val threshold = 0.5f * OsrsMapLoader.TILE_SCALE
+        if (!movedSq.isNaN() && movedSq < threshold * threshold &&
+            transform.x == luminaX && transform.y == luminaY && transform.z == luminaZ
+        ) {
+            return
+        }
+
+        transform.x = luminaX
+        transform.y = luminaY
+        transform.z = luminaZ
+        lastPlayerMarkerX = luminaX
+        lastPlayerMarkerY = luminaY
+        lastPlayerMarkerZ = luminaZ
+        sceneGraph.markDirty()
+    }
+
+    private fun createPlayerMarkerMesh(): MeshComponent {
+        val h = 0.5f
+        val verts = floatArrayOf(
+            -h, -h, -h, 0f, 1f, 0f, 0f, 0f,
+            h, -h, -h, 0f, 1f, 0f, 0f, 0f,
+            h, h, -h, 0f, 1f, 0f, 0f, 0f,
+            -h, h, -h, 0f, 1f, 0f, 0f, 0f,
+            -h, -h, h, 0f, 1f, 0f, 0f, 0f,
+            h, -h, h, 0f, 1f, 0f, 0f, 0f,
+            h, h, h, 0f, 1f, 0f, 0f, 0f,
+            -h, h, h, 0f, 1f, 0f, 0f, 0f
+        )
+        val indices = intArrayOf(
+            0, 1, 2, 0, 2, 3,
+            4, 6, 5, 4, 7, 6,
+            0, 4, 5, 0, 5, 1,
+            2, 6, 7, 2, 7, 3,
+            0, 3, 7, 0, 7, 4,
+            1, 5, 6, 1, 6, 2
+        )
+        return MeshComponent(verts, indices, 8, 12)
     }
 
     private fun parseOsrsRegionId(): Int {
@@ -344,6 +448,9 @@ class LuminaClient(private val args: Array<String>) {
         private const val DEFAULT_OSRS_REGION_ID = 12850
         /** Debounce region rebuild until the new set is stable for this many live polls. */
         private const val REGION_CHANGE_STABLE_POLLS = 2
+        private const val PLAYER_MARKER_SIZE = 0.8f
+        /** OSRS nominal vertical spacing between planes in 1/128 tile height units. */
+        private const val PLANE_HEIGHT_UNITS = 256
     }
 
     private fun printControls() {

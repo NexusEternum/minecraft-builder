@@ -126,7 +126,6 @@ class OsrsMapLoader @Inject constructor(
                         log.warn("No object locations for region {} (missing XTEA keys or loc archive)", regionId)
                     }
 
-                    val (offsetX, offsetZ) = OsrsCoordinateMapper.regionWorldOffset(regionId, originBaseX, originBaseY)
                     val stats = buildScene(
                         region,
                         underlayManager,
@@ -134,8 +133,8 @@ class OsrsMapLoader @Inject constructor(
                         objectManager,
                         store,
                         regionId,
-                        offsetX,
-                        offsetZ,
+                        originBaseX,
+                        originBaseY,
                         append = loadedCount > 0,
                         sceneObjectsPlaced = sceneObjectsPlaced
                     )
@@ -189,8 +188,8 @@ class OsrsMapLoader @Inject constructor(
         objectManager: ObjectManager,
         store: Store,
         regionId: Int,
-        worldOffsetX: Float,
-        worldOffsetZ: Float,
+        originBaseX: Int,
+        originBaseY: Int,
         append: Boolean,
         sceneObjectsPlaced: Int = 0
     ): SceneBuildStats {
@@ -198,59 +197,88 @@ class OsrsMapLoader @Inject constructor(
             sceneGraph.clear()
         }
 
-        val plane = 0
+        if (!bridgeHandlingLogged) {
+            log.info("Bridge tile plane shifting (tile setting 0x2) not implemented — plane 0 only for bridged tiles")
+            bridgeHandlingLogged = true
+        }
+
+        val locationTilesByPlane = buildLocationTileMasks(region)
         var tileCount = 0
         var terrainTriangleCount = 0
         var terrainMeshCount = 0
 
-        for (chunkX in 0 until CHUNKS_PER_AXIS) {
-            for (chunkY in 0 until CHUNKS_PER_AXIS) {
-                val startX = chunkX * CHUNK_SIZE
-                val startY = chunkY * CHUNK_SIZE
+        for (plane in 0 until PLANE_COUNT) {
+            for (chunkX in 0 until CHUNKS_PER_AXIS) {
+                for (chunkY in 0 until CHUNKS_PER_AXIS) {
+                    val startX = chunkX * CHUNK_SIZE
+                    val startY = chunkY * CHUNK_SIZE
 
-                val mesh = buildChunkMesh(
-                    region, plane, startX, startY,
-                    underlayManager, overlayManager,
-                    worldOffsetX, worldOffsetZ
-                )
-                if (mesh.triangleCount == 0) continue
-
-                val node = sceneGraph.createNode("terrain_${regionId}_${chunkX}_${chunkY}")
-                node.addComponent(Transform())
-                node.addComponent(mesh)
-                node.addComponent(
-                    MaterialComponent(
-                        albedo = floatArrayOf(1f, 1f, 1f),
-                        roughness = 0.9f,
-                        metallic = 2.0f
+                    val mesh = buildChunkMesh(
+                        region,
+                        plane,
+                        startX,
+                        startY,
+                        underlayManager,
+                        overlayManager,
+                        regionId,
+                        originBaseX,
+                        originBaseY,
+                        locationTilesByPlane[plane]
                     )
-                )
+                    if (mesh.triangleCount == 0) continue
 
-                tileCount += CHUNK_SIZE * CHUNK_SIZE
-                terrainTriangleCount += mesh.triangleCount
-                terrainMeshCount++
+                    val node = sceneGraph.createNode("terrain_${regionId}_p${plane}_${chunkX}_${chunkY}")
+                    node.addComponent(Transform())
+                    node.addComponent(mesh)
+                    node.addComponent(
+                        MaterialComponent(
+                            albedo = floatArrayOf(1f, 1f, 1f),
+                            roughness = 0.9f,
+                            metallic = 2.0f
+                        )
+                    )
+
+                    tileCount += mesh.triangleCount / 2
+                    terrainTriangleCount += mesh.triangleCount
+                    terrainMeshCount++
+                }
             }
         }
 
         if (!append) {
             val centerTileX = REGION_SIZE / 2
             val centerTileY = REGION_SIZE / 2
-            val centerHeight = -sampleHeight(region, plane, centerTileX, centerTileY) / 128f * TILE_SCALE
-            lastRegionCenterWorldX = centerTileX * TILE_SCALE + worldOffsetX
+            val centerHeight = OsrsCoordinateMapper.luminaYFromHeightUnits128(
+                sampleHeight(region, 0, centerTileX, centerTileY)
+            )
+            val (centerX, centerZ) = OsrsCoordinateMapper.regionLocalTileToLuminaXZ(
+                centerTileX,
+                centerTileY,
+                regionId,
+                originBaseX,
+                originBaseY
+            )
+            lastRegionCenterWorldX = centerX
             lastRegionCenterWorldY = centerHeight + 25f
-            lastRegionCenterWorldZ = worldOffsetZ - centerTileY * TILE_SCALE
+            lastRegionCenterWorldZ = centerZ
         }
 
         val objectStats = loadObjects(
-            region, objectManager, store, regionId, plane, worldOffsetX, worldOffsetZ, sceneObjectsPlaced
+            region,
+            objectManager,
+            store,
+            regionId,
+            originBaseX,
+            originBaseY,
+            sceneObjectsPlaced
         )
 
         log.info(
-            "Loaded OSRS region {} at offset ({}, {}): {} tiles, {} terrain meshes, {} terrain triangles, " +
+            "Loaded OSRS region {} at origin ({}, {}): {} tiles, {} terrain meshes, {} terrain triangles, " +
                 "{} objects placed (skipped-no-model={}, skipped-type={}, deduped={})",
             regionId,
-            worldOffsetX,
-            worldOffsetZ,
+            originBaseX,
+            originBaseY,
             tileCount,
             terrainMeshCount,
             terrainTriangleCount,
@@ -270,14 +298,32 @@ class OsrsMapLoader @Inject constructor(
         val dedupedMeshes: Int = 0
     )
 
+    private var bridgeHandlingLogged = false
+
+    private fun buildLocationTileMasks(region: Region): Array<Set<Long>> {
+        val masks = Array(PLANE_COUNT) { mutableSetOf<Long>() }
+        val locations = region.locations ?: return masks.map { it.toSet() }.toTypedArray()
+        val baseX = region.baseX
+        val baseY = region.baseY
+        for (location in locations) {
+            val position = location.position ?: continue
+            val plane = position.z
+            if (plane !in 0 until PLANE_COUNT) continue
+            val localTileX = position.x - baseX
+            val localTileY = position.y - baseY
+            if (localTileX !in 0 until REGION_SIZE || localTileY !in 0 until REGION_SIZE) continue
+            masks[plane].add(packRegionTile(localTileX, localTileY))
+        }
+        return masks.map { it.toSet() }.toTypedArray()
+    }
+
     private fun loadObjects(
         region: Region,
         objectManager: ObjectManager,
         store: Store,
         regionId: Int,
-        plane: Int,
-        worldOffsetX: Float,
-        worldOffsetZ: Float,
+        originBaseX: Int,
+        originBaseY: Int,
         sceneObjectsPlaced: Int
     ): ObjectLoadStats {
         val locations = region.locations ?: return ObjectLoadStats()
@@ -314,7 +360,8 @@ class OsrsMapLoader @Inject constructor(
             }
 
             val position = location.position ?: continue
-            if (!rendersOnPlane(position.z, plane)) continue
+            val objectPlane = position.z
+            if (objectPlane !in 0 until PLANE_COUNT) continue
 
             try {
                 val objectDef = objectManager.getObject(location.id)
@@ -356,16 +403,22 @@ class OsrsMapLoader @Inject constructor(
                     continue
                 }
 
-                val worldX = localTileX * TILE_SCALE + worldOffsetX
-                // Right-handed world: X=east, Y=up, Z=south → north is -Z (tile Y/north decreases Z).
-                val worldZ = worldOffsetZ - localTileY * TILE_SCALE
-                val terrainY = -sampleHeight(region, plane, localTileX, localTileY) / 128f * TILE_SCALE
+                val (worldX, worldZ) = OsrsCoordinateMapper.regionLocalTileToLuminaXZ(
+                    localTileX,
+                    localTileY,
+                    regionId,
+                    originBaseX,
+                    originBaseY
+                )
+                val terrainY = OsrsCoordinateMapper.luminaYFromHeightUnits128(
+                    sampleHeight(region, objectPlane, localTileX, localTileY)
+                )
                 val offsetScale = MODEL_SCALE
                 val worldY = terrainY +
                     (-objectDef.offsetHeight * offsetScale) +
                     (-objectDef.offsetY * offsetScale)
 
-                val node = sceneGraph.createNode("obj_${location.id}_${localTileX}_${localTileY}")
+                val node = sceneGraph.createNode("obj_${location.id}_${localTileX}_${localTileY}_p${objectPlane}")
                 node.addComponent(
                     Transform(
                         x = worldX + objectDef.offsetX * offsetScale,
@@ -567,9 +620,8 @@ class OsrsMapLoader @Inject constructor(
         return type in 0..3 || type in 10..11 || type == 22
     }
 
-    private fun rendersOnPlane(locationPlane: Int, viewPlane: Int): Boolean {
-        return locationPlane == viewPlane
-    }
+    private fun packRegionTile(localTileX: Int, localTileY: Int): Long =
+        (localTileX.toLong() shl 32) or (localTileY.toLong() and 0xFFFFFFFFL)
 
     private fun tileColor(
         region: Region,
@@ -624,6 +676,19 @@ class OsrsMapLoader @Inject constructor(
         return floatArrayOf(0.35f, 0.45f, 0.25f)
     }
 
+    private fun shouldRenderUpperPlaneTile(
+        region: Region,
+        plane: Int,
+        tileX: Int,
+        tileY: Int,
+        locationTiles: Set<Long>
+    ): Boolean {
+        val overlayId = region.getOverlayId(plane, tileX, tileY)
+        val underlayId = region.getUnderlayId(plane, tileX, tileY)
+        val hasLocation = locationTiles.contains(packRegionTile(tileX, tileY))
+        return Companion.shouldRenderUpperPlaneTile(overlayId, underlayId, hasLocation)
+    }
+
     private fun overlayRgb(overlay: OverlayDefinition): FloatArray? {
         OsrsColorDecoder.overlayRgb(overlay.rgbColor)?.let { return it }
         OsrsColorDecoder.overlayRgb(overlay.secondaryRgbColor)?.let { return it }
@@ -640,22 +705,33 @@ class OsrsMapLoader @Inject constructor(
         startY: Int,
         underlayManager: UnderlayManager,
         overlayManager: OverlayManager,
-        worldOffsetX: Float,
-        worldOffsetZ: Float
+        regionId: Int,
+        originBaseX: Int,
+        originBaseY: Int,
+        locationTiles: Set<Long>
     ): MeshComponent {
         val tilesPerChunk = CHUNK_SIZE * CHUNK_SIZE
-        val vertexCount = tilesPerChunk * 4
-        val triangleCount = tilesPerChunk * 2
-
-        val verts = FloatArray(vertexCount * FLOATS_PER_VERTEX)
-        val indices = IntArray(triangleCount * 3)
+        val verts = FloatArray(tilesPerChunk * 4 * FLOATS_PER_VERTEX)
+        val indices = IntArray(tilesPerChunk * 2 * 3)
 
         var vi = 0
         var ii = 0
+        var builtTiles = 0
         for (localY in 0 until CHUNK_SIZE) {
             for (localX in 0 until CHUNK_SIZE) {
                 val tileX = startX + localX
                 val tileY = startY + localY
+                if (plane > 0 && !shouldRenderUpperPlaneTile(
+                        region,
+                        plane,
+                        tileX,
+                        tileY,
+                        locationTiles
+                    )
+                ) {
+                    continue
+                }
+
                 val packedColor = packTileColorToUv(
                     tileColor(region, plane, tileX, tileY, underlayManager, overlayManager)
                 )
@@ -667,9 +743,16 @@ class OsrsMapLoader @Inject constructor(
                     val off = vi * FLOATS_PER_VERTEX
 
                     val height = sampleHeight(region, plane, cx, cy)
-                    verts[off] = cx * TILE_SCALE + worldOffsetX
-                    verts[off + 1] = -height / 128f * TILE_SCALE
-                    verts[off + 2] = worldOffsetZ - cy * TILE_SCALE
+                    val (luminaX, luminaZ) = OsrsCoordinateMapper.regionLocalTileToLuminaXZ(
+                        cx,
+                        cy,
+                        regionId,
+                        originBaseX,
+                        originBaseY
+                    )
+                    verts[off] = luminaX
+                    verts[off + 1] = OsrsCoordinateMapper.luminaYFromHeightUnits128(height)
+                    verts[off + 2] = luminaZ
 
                     val normal = computeNormal(region, plane, cx, cy)
                     verts[off + 3] = normal[0]
@@ -687,10 +770,15 @@ class OsrsMapLoader @Inject constructor(
                 indices[ii++] = baseVertex
                 indices[ii++] = baseVertex + 3
                 indices[ii++] = baseVertex + 2
+                builtTiles++
             }
         }
 
-        return MeshComponent(verts, indices, vertexCount, triangleCount)
+        if (builtTiles == 0) {
+            return MeshComponent(FloatArray(0), IntArray(0), 0, 0)
+        }
+
+        return MeshComponent(verts.copyOf(vi * FLOATS_PER_VERTEX), indices.copyOf(ii), vi, builtTiles * 2)
     }
 
     private fun packTileColorToUv(color: FloatArray): Float {
@@ -732,6 +820,7 @@ class OsrsMapLoader @Inject constructor(
         private const val REGION_SIZE = 64
         private const val CHUNK_SIZE = 8
         private const val CHUNKS_PER_AXIS = REGION_SIZE / CHUNK_SIZE
+        private const val PLANE_COUNT = 4
         private const val FLOATS_PER_VERTEX = 8
         /** Max placed object instances across the entire multi-region scene (not per region). */
         const val MAX_SCENE_OBJECTS = 12000
@@ -749,5 +838,12 @@ class OsrsMapLoader @Inject constructor(
             val b = (rgb and 0xFF) / 255f
             return floatArrayOf(r, g, b)
         }
+
+        /** Upper-plane terrain: render when overlay, underlay, or a location exists on the tile. */
+        fun shouldRenderUpperPlaneTile(
+            overlayId: Int,
+            underlayId: Int,
+            hasLocation: Boolean
+        ): Boolean = overlayId != 0 || underlayId != 0 || hasLocation
     }
 }

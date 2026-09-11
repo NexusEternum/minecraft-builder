@@ -26,7 +26,10 @@ class LiveGameStateTest {
             cameraY = 2560,
             cameraZ = 640,
             cameraPitch = 512,
-            cameraYaw = 1024
+            cameraYaw = 1024,
+            playerLocalX = 6400,
+            playerLocalY = 3200,
+            playerPlane = 0
         )
         val b = a.copy(mapRegions = regions.copyOf())
         assert(a == b)
