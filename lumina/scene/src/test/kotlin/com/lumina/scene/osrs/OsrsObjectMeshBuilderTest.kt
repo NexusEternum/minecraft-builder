@@ -117,6 +117,43 @@ class OsrsObjectMeshBuilderTest {
     }
 
     @Test
+    fun faceTransparencySplitSeparatesOpaqueTranslucentAndSkipsInvisible() {
+        val model = triangleModel(JagexColor.packHSL(0, 6, 50).toInt())
+        model.faceCount = 4
+        model.faceIndices1 = intArrayOf(0, 0, 0, 0)
+        model.faceIndices2 = intArrayOf(1, 1, 1, 1)
+        model.faceIndices3 = intArrayOf(2, 2, 2, 2)
+        model.faceColors = shortArrayOf(
+            JagexColor.packHSL(0, 6, 50).toShort(),
+            JagexColor.packHSL(5, 6, 50).toShort(),
+            JagexColor.packHSL(10, 6, 50).toShort(),
+            JagexColor.packHSL(15, 6, 50).toShort()
+        )
+        model.faceTransparencies = byteArrayOf(0, 64, (-4).toByte(), (-2).toByte())
+
+        assertEquals(OsrsObjectMeshBuilder.FaceTransparencyClass.OPAQUE, OsrsObjectMeshBuilder.classifyFaceTransparency(0))
+        assertEquals(OsrsObjectMeshBuilder.FaceTransparencyClass.TRANSLUCENT, OsrsObjectMeshBuilder.classifyFaceTransparency(64))
+        assertEquals(OsrsObjectMeshBuilder.FaceTransparencyClass.TRANSLUCENT, OsrsObjectMeshBuilder.classifyFaceTransparency(252))
+        assertEquals(OsrsObjectMeshBuilder.FaceTransparencyClass.INVISIBLE, OsrsObjectMeshBuilder.classifyFaceTransparency(254))
+
+        val meshes = OsrsObjectMeshBuilder.modelDefinitionToMeshes(model, orientation = 0)
+        assertEquals(1, meshes.opaque.triangleCount)
+        assertEquals(3, meshes.opaque.vertexCount)
+        assertEquals(2, meshes.translucent?.triangleCount)
+        assertEquals(6, meshes.translucent?.vertexCount)
+    }
+
+    @Test
+    fun fullyInvisibleModelProducesEmptyMeshes() {
+        val model = triangleModel(JagexColor.packHSL(0, 6, 50).toInt())
+        model.faceTransparencies = byteArrayOf(255.toByte())
+        val meshes = OsrsObjectMeshBuilder.modelDefinitionToMeshes(model, orientation = 0)
+        assertEquals(0, meshes.opaque.triangleCount)
+        assertEquals(null, meshes.translucent)
+        assertFalse(meshes.hasGeometry)
+    }
+
+    @Test
     fun resolveTexturedFaceColorFallsBackWhenTextureMissing() {
         val cache = textureCache(emptyMap())
         val fallback = OsrsColorDecoder.texturedFallbackLinear()

@@ -24,7 +24,9 @@ data class MaterialComponent(
     var emissive: FloatArray = floatArrayOf(0f, 0f, 0f),
     var textureId: Int = -1,
     var normalMapId: Int = -1,
-    var roughnessMapId: Int = -1
+    var roughnessMapId: Int = -1,
+    /** When true, TLAS instance mask is translucent — shadow rays skip this geometry. */
+    var translucent: Boolean = false
 ) {
     override fun equals(other: Any?) = this === other
     override fun hashCode() = System.identityHashCode(this)

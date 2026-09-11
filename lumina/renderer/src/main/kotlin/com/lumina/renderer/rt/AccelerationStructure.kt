@@ -243,7 +243,8 @@ class AccelerationStructureManager @Inject constructor(
                     MemoryUtil.memFree(instanceData)
                     return
                 }
-                instanceData.putInt(offset + 48, customIndex or (0xFF shl 24))
+                val instanceMask = record.rayTraceMask and 0xFF
+                instanceData.putInt(offset + 48, customIndex or (instanceMask shl 24))
                 instanceData.putInt(offset + 52, 0)
                 instanceData.putLong(offset + 56, blas.deviceAddress)
 

@@ -8,5 +8,7 @@ data class SceneInstanceRecord(
     val blasId: Int,
     val indexTriBase: Int,
     val transform: Transform,
-    val nodeName: String
+    val nodeName: String,
+    /** 8-bit TLAS instance mask packed into the high byte of instanceCustomIndex. */
+    val rayTraceMask: Int = 0x1
 )

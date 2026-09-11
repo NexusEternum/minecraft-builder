@@ -5,6 +5,7 @@ import com.lumina.renderer.vulkan.VulkanBuffer
 import com.lumina.renderer.vulkan.VulkanContext
 import com.lumina.renderer.vulkan.VulkanMemory
 import com.lumina.scene.graph.MaterialComponent
+import com.lumina.scene.osrs.OsrsObjectMeshBuilder
 import com.lumina.scene.graph.MeshComponent
 import com.lumina.scene.graph.SceneGraph
 import com.lumina.scene.graph.SceneNode
@@ -221,13 +222,20 @@ class SceneBufferManager @Inject constructor(
                 log.warn("BLAS build failed for instance {} node={}", pending.instanceIndex, pending.node.name)
                 continue
             }
+            val mat = pending.node.getComponent(MaterialComponent::class.java) ?: MaterialComponent()
+            val rayTraceMask = if (mat.translucent) {
+                OsrsObjectMeshBuilder.RT_INSTANCE_MASK_TRANSLUCENT
+            } else {
+                OsrsObjectMeshBuilder.RT_INSTANCE_MASK_OPAQUE
+            }
             records.add(
                 SceneInstanceRecord(
                     instanceIndex = pending.instanceIndex,
                     blasId = blasId,
                     indexTriBase = pending.slot.indexTriBase,
                     transform = pending.transform,
-                    nodeName = pending.node.name
+                    nodeName = pending.node.name,
+                    rayTraceMask = rayTraceMask
                 )
             )
             log.info(

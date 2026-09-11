@@ -390,7 +390,7 @@ class OsrsMapLoader @Inject constructor(
 
         val modelLoader = ModelLoader()
         val modelDefCache = HashMap<Int, ModelDefinition>()
-        val meshCache = HashMap<OsrsObjectMeshBuilder.MeshCacheKey, MeshComponent>()
+        val meshCache = HashMap<OsrsObjectMeshBuilder.MeshCacheKey, OsrsObjectMeshBuilder.ObjectMeshBuildResult>()
 
         var placed = 0
         var skippedNoModel = 0
@@ -429,14 +429,14 @@ class OsrsMapLoader @Inject constructor(
 
                 val orientation = location.orientation and 3
                 val cacheKey = OsrsObjectMeshBuilder.meshCacheKey(location.id, modelId, orientation)
-                var mesh = meshCache[cacheKey]
-                if (mesh == null) {
+                var meshes = meshCache[cacheKey]
+                if (meshes == null) {
                     val modelDef = loadModelDefinition(store, modelLoader, modelDefCache, modelId)
                     if (modelDef == null) {
                         skippedNoModel++
                         continue
                     }
-                    val built = OsrsObjectMeshBuilder.modelDefinitionToMesh(
+                    val built = OsrsObjectMeshBuilder.modelDefinitionToMeshes(
                         modelDef,
                         orientation,
                         objectDef.recolorToFind,
@@ -444,12 +444,12 @@ class OsrsMapLoader @Inject constructor(
                         objectDef.retextureToFind,
                         textureColors = textureColors
                     )
-                    if (built.triangleCount == 0) {
+                    if (!built.hasGeometry) {
                         skippedNoModel++
                         continue
                     }
                     meshCache[cacheKey] = built
-                    mesh = built
+                    meshes = built
                 } else {
                     dedupedMeshes++
                 }
@@ -477,23 +477,46 @@ class OsrsMapLoader @Inject constructor(
                     (-objectDef.offsetHeight * offsetScale) +
                     (-objectDef.offsetY * offsetScale)
 
+                val transform = Transform(
+                    x = worldX + objectDef.offsetX * offsetScale,
+                    y = worldY,
+                    z = worldZ
+                )
+                val objectMaterial = MaterialComponent(
+                    albedo = floatArrayOf(1f, 1f, 1f),
+                    roughness = 0.85f,
+                    metallic = 2.0f
+                )
+
                 val node = sceneGraph.createNode("obj_${location.id}_${localTileX}_${localTileY}_p${objectPlane}")
-                node.addComponent(
-                    Transform(
-                        x = worldX + objectDef.offsetX * offsetScale,
-                        y = worldY,
-                        z = worldZ
-                    )
-                )
-                node.addComponent(mesh)
-                node.addComponent(
-                    MaterialComponent(
-                        albedo = floatArrayOf(1f, 1f, 1f),
-                        roughness = 0.85f,
-                        metallic = 2.0f
-                    )
-                )
+                node.addComponent(transform)
+                node.addComponent(meshes.opaque)
+                node.addComponent(objectMaterial)
                 placed++
+
+                val translucentMesh = meshes.translucent
+                if (translucentMesh != null && translucentMesh.triangleCount > 0) {
+                    val glassNode = sceneGraph.createNode(
+                        "obj_${location.id}_${localTileX}_${localTileY}_p${objectPlane}_glass"
+                    )
+                    glassNode.addComponent(
+                        Transform(
+                            x = transform.x,
+                            y = transform.y,
+                            z = transform.z
+                        )
+                    )
+                    glassNode.addComponent(translucentMesh)
+                    glassNode.addComponent(
+                        MaterialComponent(
+                            albedo = floatArrayOf(1f, 1f, 1f),
+                            roughness = 0.85f,
+                            metallic = 2.0f,
+                            translucent = true
+                        )
+                    )
+                    placed++
+                }
             } catch (e: Exception) {
                 log.debug(
                     "Failed to place object {} type {} at {}: {}",

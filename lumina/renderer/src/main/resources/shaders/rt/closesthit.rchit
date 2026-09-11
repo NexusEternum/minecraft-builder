@@ -204,10 +204,11 @@ void main() {
     vec3 sunColor = vec3(3.0, 2.7, 2.2);
     vec3 sunDir = sampleSunDirection(sunCenter, payload.seed);
 
+    // v1 approximation — glass transmits 100% untinted; tinting via any-hit is future work.
     shadowed = true;
     traceRayEXT(topLevelAS,
         gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT,
-        0xFF, 0, 0, 1,
+        0x01, 0, 0, 1,
         worldPos + normal * 0.001,
         0.001, sunDir, 10000.0, 1);
 

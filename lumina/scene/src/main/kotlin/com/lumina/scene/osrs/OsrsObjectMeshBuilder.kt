@@ -14,11 +14,35 @@ object OsrsObjectMeshBuilder {
     private const val MODEL_SCALE = OsrsMapLoader.TILE_SCALE / 128f
     private const val FLOATS_PER_VERTEX = 8
 
+    /**
+     * RuneLite GPU treats face alpha >= 253 as invisible
+     * ([net.runelite.client.plugins.gpu.ModelUploader.faceTransparency]).
+     * 0 = opaque; 1..252 = translucent glass/water; 253..255 = skip entirely.
+     */
+    const val INVISIBLE_FACE_TRANSPARENCY_THRESHOLD = 253
+
+    const val RT_INSTANCE_MASK_OPAQUE = 0x1
+    const val RT_INSTANCE_MASK_TRANSLUCENT = 0x2
+
+    enum class FaceTransparencyClass {
+        OPAQUE,
+        TRANSLUCENT,
+        INVISIBLE
+    }
+
     data class MeshCacheKey(
         val objectId: Int,
         val modelId: Int,
         val orientation: Int
     )
+
+    data class ObjectMeshBuildResult(
+        val opaque: MeshComponent,
+        val translucent: MeshComponent? = null
+    ) {
+        val hasGeometry: Boolean
+            get() = opaque.triangleCount > 0 || (translucent?.triangleCount ?: 0) > 0
+    }
 
     /**
      * Location types we place in the scene.
@@ -32,6 +56,20 @@ object OsrsObjectMeshBuilder {
 
     fun meshCacheKey(objectId: Int, modelId: Int, orientation: Int): MeshCacheKey =
         MeshCacheKey(objectId, modelId, orientation and 3)
+
+    fun faceTransparencyAlpha(face: Int, faceTransparencies: ByteArray?): Int {
+        if (faceTransparencies == null || face >= faceTransparencies.size) {
+            return 0
+        }
+        return faceTransparencies[face].toInt() and 0xFF
+    }
+
+    fun classifyFaceTransparency(alpha: Int): FaceTransparencyClass =
+        when {
+            alpha >= INVISIBLE_FACE_TRANSPARENCY_THRESHOLD -> FaceTransparencyClass.INVISIBLE
+            alpha > 0 -> FaceTransparencyClass.TRANSLUCENT
+            else -> FaceTransparencyClass.OPAQUE
+        }
 
     /**
      * Apply object-definition recolor pairs before HSL decode.
@@ -67,18 +105,18 @@ object OsrsObjectMeshBuilder {
         return false
     }
 
-    fun modelDefinitionToMesh(
+    fun modelDefinitionToMeshes(
         model: ModelDefinition,
         orientation: Int,
         recolorToFind: ShortArray? = null,
         recolorToReplace: ShortArray? = null,
         retextureToFind: ShortArray? = null,
         textureColors: OsrsTextureColorCache? = null
-    ): MeshComponent {
+    ): ObjectMeshBuildResult {
         val vertexCount = model.vertexCount
         val faceCount = model.faceCount
         if (vertexCount <= 0 || faceCount <= 0) {
-            return MeshComponent(FloatArray(0), IntArray(0), 0, 0)
+            return ObjectMeshBuildResult(MeshComponent(FloatArray(0), IntArray(0), 0, 0))
         }
 
         val srcX = model.vertexX
@@ -96,14 +134,99 @@ object OsrsObjectMeshBuilder {
         val rotatedZ = IntArray(vertexCount)
         rotateVertices(srcX, srcY, srcZ, vertexCount, orientation, rotatedX, rotatedY, rotatedZ)
 
-        var visibleFaces = 0
+        var opaqueFaces = 0
+        var translucentFaces = 0
         for (face in 0 until faceCount) {
-            if (faceTransparencies != null && (faceTransparencies[face].toInt() and 0xFF) > 250) {
-                continue
+            when (classifyFaceTransparency(faceTransparencyAlpha(face, faceTransparencies))) {
+                FaceTransparencyClass.OPAQUE -> opaqueFaces++
+                FaceTransparencyClass.TRANSLUCENT -> translucentFaces++
+                FaceTransparencyClass.INVISIBLE -> Unit
             }
-            visibleFaces++
         }
 
+        val opaque = buildFaceMesh(
+            faceCount = faceCount,
+            visibleFaces = opaqueFaces,
+            includeFace = { face ->
+                classifyFaceTransparency(faceTransparencyAlpha(face, faceTransparencies)) ==
+                    FaceTransparencyClass.OPAQUE
+            },
+            idx1 = idx1,
+            idx2 = idx2,
+            idx3 = idx3,
+            rotatedX = rotatedX,
+            rotatedY = rotatedY,
+            rotatedZ = rotatedZ,
+            faceColors = faceColors,
+            faceTextures = faceTextures,
+            recolorToFind = recolorToFind,
+            recolorToReplace = recolorToReplace,
+            retextureToFind = retextureToFind,
+            textureColors = textureColors
+        )
+
+        val translucent = if (translucentFaces > 0) {
+            buildFaceMesh(
+                faceCount = faceCount,
+                visibleFaces = translucentFaces,
+                includeFace = { face ->
+                    classifyFaceTransparency(faceTransparencyAlpha(face, faceTransparencies)) ==
+                        FaceTransparencyClass.TRANSLUCENT
+                },
+                idx1 = idx1,
+                idx2 = idx2,
+                idx3 = idx3,
+                rotatedX = rotatedX,
+                rotatedY = rotatedY,
+                rotatedZ = rotatedZ,
+                faceColors = faceColors,
+                faceTextures = faceTextures,
+                recolorToFind = recolorToFind,
+                recolorToReplace = recolorToReplace,
+                retextureToFind = retextureToFind,
+                textureColors = textureColors
+            )
+        } else {
+            null
+        }
+
+        return ObjectMeshBuildResult(opaque, translucent)
+    }
+
+    /** Back-compat helper for tests/callers that only need the opaque mesh. */
+    fun modelDefinitionToMesh(
+        model: ModelDefinition,
+        orientation: Int,
+        recolorToFind: ShortArray? = null,
+        recolorToReplace: ShortArray? = null,
+        retextureToFind: ShortArray? = null,
+        textureColors: OsrsTextureColorCache? = null
+    ): MeshComponent = modelDefinitionToMeshes(
+        model,
+        orientation,
+        recolorToFind,
+        recolorToReplace,
+        retextureToFind,
+        textureColors
+    ).opaque
+
+    private fun buildFaceMesh(
+        faceCount: Int,
+        visibleFaces: Int,
+        includeFace: (Int) -> Boolean,
+        idx1: IntArray,
+        idx2: IntArray,
+        idx3: IntArray,
+        rotatedX: IntArray,
+        rotatedY: IntArray,
+        rotatedZ: IntArray,
+        faceColors: ShortArray?,
+        faceTextures: ShortArray?,
+        recolorToFind: ShortArray?,
+        recolorToReplace: ShortArray?,
+        retextureToFind: ShortArray?,
+        textureColors: OsrsTextureColorCache?
+    ): MeshComponent {
         if (visibleFaces == 0) {
             return MeshComponent(FloatArray(0), IntArray(0), 0, 0)
         }
@@ -115,7 +238,7 @@ object OsrsObjectMeshBuilder {
         var vi = 0
         var ii = 0
         for (face in 0 until faceCount) {
-            if (faceTransparencies != null && (faceTransparencies[face].toInt() and 0xFF) > 250) {
+            if (!includeFace(face)) {
                 continue
             }
 
