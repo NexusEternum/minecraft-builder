@@ -111,10 +111,14 @@ vec3 evaluatePBR(vec3 N, vec3 V, vec3 L, vec3 albedo, float roughness, float met
 }
 
 void main() {
-    uint triIndex = gl_PrimitiveID;
-    uint i0 = indices[triIndex * 3];
-    uint i1 = indices[triIndex * 3 + 1];
-    uint i2 = indices[triIndex * 3 + 2];
+    uint customIndex = gl_InstanceCustomIndexEXT;
+    uint matIdx = customIndex & 0xFFFu;
+    uint indexTriBase = (customIndex >> 12u) & 0xFFFu;
+
+    uint triIndex = indexTriBase + gl_PrimitiveID;
+    uint i0 = indices[triIndex * 3u];
+    uint i1 = indices[triIndex * 3u + 1u];
+    uint i2 = indices[triIndex * 3u + 2u];
 
     Vertex v0 = unpackVertex(i0);
     Vertex v1 = unpackVertex(i1);
@@ -126,8 +130,6 @@ void main() {
 
     worldPos = vec3(gl_ObjectToWorldEXT * vec4(worldPos, 1.0));
     normal = normalize(vec3(gl_ObjectToWorldEXT * vec4(normal, 0.0)));
-
-    uint matIdx = gl_InstanceCustomIndexEXT;
     vec3 albedo = materialData[matIdx * 2u].xyz;
     float roughness = materialData[matIdx * 2u].w;
     vec3 emissive = materialData[matIdx * 2u + 1u].xyz;

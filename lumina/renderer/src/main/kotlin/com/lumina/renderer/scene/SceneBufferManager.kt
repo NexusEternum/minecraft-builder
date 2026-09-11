@@ -67,26 +67,27 @@ class SceneBufferManager @Inject constructor(
         val idxData = MemoryUtil.memAlloc(indexSize.toInt())
         val matData = MemoryUtil.memAlloc(matSize.toInt())
 
-        var vertexOffset = 0
-        var indexOffset = 0
+        var vertexOffset = 0 // in vertices (not floats)
+        var indexOffset = 0  // in indices
         var meshIdx = 0
+
+        data class MeshInfo(val mesh: MeshComponent, val idxByteOffset: Int, val indexTriBase: Int)
+        val meshInfos = mutableListOf<MeshInfo>()
 
         for (node in meshNodes) {
             val mesh = node.getComponent(MeshComponent::class.java) ?: continue
             val mat = node.getComponent(MaterialComponent::class.java) ?: MaterialComponent()
 
             for (f in mesh.vertexData) vertData.putFloat(f)
-            for (idx in mesh.indexData) idxData.putInt(idx + vertexOffset / 8)
+            // Global indices: offset by cumulative vertex count so they index into the combined buffer
+            for (idx in mesh.indexData) idxData.putInt(idx + vertexOffset)
 
-            // vec4: albedo.xyz, roughness
             matData.putFloat(mat.albedo[0]).putFloat(mat.albedo[1]).putFloat(mat.albedo[2]).putFloat(mat.roughness)
-            // vec4: emissive.xyz, metallic
             matData.putFloat(mat.emissive[0]).putFloat(mat.emissive[1]).putFloat(mat.emissive[2]).putFloat(mat.metallic)
 
-            val vertByteOffset = vertexOffset * 4
             val idxByteOffset = indexOffset * 4
-
-            accelStructure.buildBLAS(mesh, vertBuf.buffer, idxBuf.buffer, vertByteOffset, idxByteOffset)
+            val indexTriBase = indexOffset / 3
+            meshInfos.add(MeshInfo(mesh, idxByteOffset, indexTriBase))
 
             vertexOffset += mesh.vertexData.size / 8
             indexOffset += mesh.indexData.size
@@ -97,9 +98,17 @@ class SceneBufferManager @Inject constructor(
         idxData.flip()
         matData.flip()
 
+        // Upload all data to GPU BEFORE building BLAS
         VulkanMemory.uploadBuffer(ctx, vertBuf, vertData)
         VulkanMemory.uploadBuffer(ctx, idxBuf, idxData)
         VulkanMemory.uploadBuffer(ctx, matBuf, matData)
+
+        // Build BLAS after data is on the GPU
+        // Vertex offset = 0 because indices are global (already offset to combined buffer)
+        // Index offset = per-mesh byte offset into the combined index buffer
+        for (info in meshInfos) {
+            accelStructure.buildBLAS(info.mesh, vertBuf.buffer, idxBuf.buffer, 0, info.idxByteOffset, info.indexTriBase, vertexOffset)
+        }
 
         MemoryUtil.memFree(vertData)
         MemoryUtil.memFree(idxData)

@@ -23,7 +23,8 @@ data class BLASEntry(
     val buffer: Long,
     val memory: Long,
     val deviceAddress: Long,
-    val triangleCount: Int
+    val triangleCount: Int,
+    val indexTriBase: Int = 0
 )
 
 @Singleton
@@ -42,7 +43,7 @@ class AccelerationStructureManager @Inject constructor(
     private var scratchBuffer: Long = 0
     private var scratchMemory: Long = 0
 
-    fun buildBLAS(mesh: MeshComponent, vertexBuffer: Long, indexBuffer: Long, vertexOffset: Int, indexOffset: Int): Int {
+    fun buildBLAS(mesh: MeshComponent, vertexBuffer: Long, indexBuffer: Long, vertexOffset: Int, indexOffset: Int, indexTriBase: Int = 0, totalVertexCount: Int = 0): Int {
         if (!ctx.rtSupported) return -1
         val hash = System.identityHashCode(mesh)
         if (blasCache.containsKey(hash)) return hash
@@ -54,7 +55,7 @@ class AccelerationStructureManager @Inject constructor(
                 .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR)
                 .vertexFormat(VK_FORMAT_R32G32B32_SFLOAT)
                 .vertexStride(32) // 8 floats * 4 bytes
-                .maxVertex(mesh.vertexCount - 1)
+                .maxVertex(if (totalVertexCount > 0) totalVertexCount - 1 else mesh.vertexCount - 1)
                 .indexType(VK_INDEX_TYPE_UINT32)
 
             triangles.vertexData().deviceAddress(getBufferAddress(dev, vertexBuffer) + vertexOffset.toLong())
@@ -73,6 +74,7 @@ class AccelerationStructureManager @Inject constructor(
                 .type(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR)
                 .flags(VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR or
                        VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR)
+                .geometryCount(1)
                 .pGeometries(geometry)
 
             val sizeInfo = VkAccelerationStructureBuildSizesInfoKHR.calloc(stack)
@@ -132,7 +134,7 @@ class AccelerationStructureManager @Inject constructor(
             // Cleanup scratch
             VulkanMemory.destroyBuffer(ctx, scratch)
 
-            val entry = BLASEntry(hash.toLong(), accelStruct, asBuffer.buffer, asBuffer.memory, deviceAddr, mesh.triangleCount)
+            val entry = BLASEntry(hash.toLong(), accelStruct, asBuffer.buffer, asBuffer.memory, deviceAddr, mesh.triangleCount, indexTriBase)
             blasCache[hash] = entry
             mesh.blasId = hash
 
@@ -180,8 +182,9 @@ class AccelerationStructureManager @Inject constructor(
                 instanceData.putFloat(offset + 40, xform.scaleZ)
                 instanceData.putFloat(offset + 44, xform.z)
 
-                // instanceCustomIndex:24, mask:8
-                instanceData.putInt(offset + 48, i or (0xFF shl 24))
+                // instanceCustomIndex:24 (lower 12 = material index, upper 12 = index tri base), mask:8
+                val customIndex = (i and 0xFFF) or ((blas.indexTriBase and 0xFFF) shl 12)
+                instanceData.putInt(offset + 48, customIndex or (0xFF shl 24))
                 // instanceShaderBindingTableRecordOffset:24, flags:8
                 instanceData.putInt(offset + 52, 0)
                 // accelerationStructureReference
@@ -214,6 +217,7 @@ class AccelerationStructureManager @Inject constructor(
                 .sType(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR)
                 .type(VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR)
                 .flags(VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR)
+                .geometryCount(1)
                 .pGeometries(geometry)
 
             val sizeInfo = VkAccelerationStructureBuildSizesInfoKHR.calloc(stack)
