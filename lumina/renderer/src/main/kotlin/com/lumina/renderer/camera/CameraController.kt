@@ -45,13 +45,15 @@ class CameraController @Inject constructor(
 
     private fun handleKeyboard(window: Long, dt: Float) {
         val speed = moveSpeed * dt
-        val dirX = cos(yaw.toDouble()).toFloat()
-        val dirZ = sin(yaw.toDouble()).toFloat()
+        val fwdX = -sin(yaw.toDouble()).toFloat()
+        val fwdZ = -cos(yaw.toDouble()).toFloat()
+        val rightX = cos(yaw.toDouble()).toFloat()
+        val rightZ = -sin(yaw.toDouble()).toFloat()
 
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) { x += dirX * speed; z += dirZ * speed }
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) { x -= dirX * speed; z -= dirZ * speed }
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) { x -= dirZ * speed; z += dirX * speed }
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) { x += dirZ * speed; z -= dirX * speed }
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) { x += fwdX * speed; z += fwdZ * speed }
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) { x -= fwdX * speed; z -= fwdZ * speed }
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) { x -= rightX * speed; z -= rightZ * speed }
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) { x += rightX * speed; z += rightZ * speed }
         if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) { y += speed }
         if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) { y -= speed }
     }
