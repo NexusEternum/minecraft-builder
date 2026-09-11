@@ -6,10 +6,15 @@ plugins {
 application {
     mainClass.set("com.lumina.launcher.LuminaLauncherKt")
     applicationDefaultJvmArgs = listOf(
+        "-ea",
         "-Xmx4g",
         "-Xss4m",
         "-XX:+UseZGC",
+        "-XX:+DisableAttachMechanism",
+        "-XX:CompileThreshold=1500",
         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
+        "--add-opens", "java.base/java.net=ALL-UNNAMED",
+        "--add-opens", "java.base/java.io=ALL-UNNAMED",
         "-Dorg.lwjgl.util.DebugLoader=true",
         "-Dorg.lwjgl.system.stackSize=2048"
     )
@@ -18,11 +23,24 @@ application {
 val lwjglVersion: String by project
 val lwjglNatives: String = rootProject.extra["detectedLwjglNatives"] as String
 
+// RuneLite's client POM pins guice:4.1.0:no_aop; conflict resolution to Lumina's 6.0.0
+// keeps the classifier and breaks resolution (no guice-6.0.0-no_aop.jar exists).
+configurations.configureEach {
+    resolutionStrategy.eachDependency {
+        if (requested.group == "com.google.inject" && requested.name == "guice") {
+            useTarget("com.google.inject:guice:4.1.0:no_aop")
+            because("RuneLite client requires guice no_aop classifier on the shared launcher classpath")
+        }
+    }
+}
+
 dependencies {
     implementation(project(":client-core"))
     implementation(project(":plugin-api"))
     implementation(project(":renderer"))
     implementation(project(":scene"))
+    // RuneLite client kept off client-core compile classpath; loaded at runtime for --game.
+    runtimeOnly(project(":game"))
 
     implementation("com.google.inject:guice:${property("guiceVersion")}")
     implementation("com.google.code.gson:gson:${property("gsonVersion")}")
@@ -75,11 +93,14 @@ tasks.register<JavaExec>("runDemo") {
     mainClass.set("com.lumina.launcher.LuminaLauncherKt")
     classpath = sourceSets.main.get().runtimeClasspath
     args = listOf("--demo", "--developer-mode")
-    jvmArgs = listOf(
-        "-Xmx4g",
-        "-Xss4m",
-        "-XX:+UseZGC",
-        "--add-opens", "java.base/java.lang=ALL-UNNAMED",
-        "-Dorg.lwjgl.system.stackSize=2048"
-    )
+    jvmArgs = application.applicationDefaultJvmArgs.toList()
+}
+
+tasks.register<JavaExec>("runGame") {
+    group = "application"
+    description = "Boot the real OSRS client via embedded RuneLite"
+    mainClass.set("com.lumina.launcher.LuminaLauncherKt")
+    classpath = sourceSets.main.get().runtimeClasspath
+    args = listOf("--game")
+    jvmArgs = application.applicationDefaultJvmArgs.toList()
 }

@@ -15,6 +15,9 @@ fun main(args: Array<String>) {
     log.info("Memory: {} MB max", Runtime.getRuntime().maxMemory() / 1024 / 1024)
     log.info("Args: {}", if (args.isEmpty()) "none" else args.joinToString(" "))
 
+    if ("--game" in args) {
+        log.info("Running embedded RuneLite game client (login screen via Jagex gamepack)")
+    }
     if ("--demo" in args) {
         log.info("Running in DEMO mode (no OSRS connection required)")
     }
@@ -39,6 +42,7 @@ private fun printHelp() {
         Usage: java -jar lumina-all.jar [options]
         
         Options:
+          --game              Boot the real OSRS client via embedded RuneLite (login screen)
           --demo              Run with demo scene (no OSRS connection needed)
           --developer-mode    Enable developer mode and sideloaded plugins
           --jx_session_id ID  Jagex session ID (from Jagex Launcher)

@@ -4,6 +4,7 @@ import com.google.inject.Guice
 import com.google.inject.Injector
 import com.lumina.core.config.LuminaModule
 import com.lumina.core.game.GameJarLoader
+import com.lumina.core.game.GameLauncher
 import com.lumina.core.game.JagexAuthManager
 import com.lumina.core.game.JagexLauncherIPC
 import com.lumina.plugin.*
@@ -39,6 +40,10 @@ class LuminaClient(private val args: Array<String>) {
     private var newHeight = 0
 
     fun start() {
+        if (GameLauncher.launchIfRequested(args)) {
+            return
+        }
+
         log.info("Lumina OSRS Client starting...")
 
         val luminaDir = File(System.getProperty("user.home"), ".lumina")
